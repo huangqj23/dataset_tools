@@ -1,0 +1,98 @@
+我来帮你说明如何将代码库上传到PyPI（Python Package Index）以支持通过pip安装。以下是具体步骤：
+
+1. 首先，确保你有一个PyPI账号
+```bash
+# 访问 https://pypi.org 注册账号
+```
+
+2. 安装必要的打包工具：
+```bash
+pip install build twine
+```
+
+3. 在上传之前，确保你的项目结构完整：
+```
+dataset_tools/
+├── dataset_tools/
+│   ├── __init__.py
+│   ├── obb/
+│   │   ├── __init__.py
+│   │   ├── obb_dataset_converter.py
+│   │   └── obb_dataset_visualizer.py
+│   └── hbb/
+│       ├── __init__.py
+│       ├── hbb_dataset_converter.py
+│       └── hbb_dataset_visualizer.py
+├── README.md
+├── requirements.txt
+├── setup.py
+└── LICENSE
+```
+
+4. 构建分发包：
+```bash
+# 在项目根目录下执行
+python -m build
+```
+这将在 `dist/` 目录下创建两个文件：
+- `dataset_tools-0.1.0.tar.gz` (源码分发版本)
+- `dataset_tools-0.1.0-py3-none-any.whl` (构建的wheel包)
+
+5. 测试你的包（可选但推荐）：
+```bash
+# 创建一个新的虚拟环境
+python -m venv test_env
+source test_env/bin/activate  # Linux/Mac
+# 或
+test_env\Scripts\activate  # Windows
+
+# 安装构建的包
+pip install dist/dataset_tools-0.1.0-py3-none-any.whl
+
+# 测试导入
+python -c "from dataset_tools.obb import OBBDatasetConverter"
+```
+
+6. 上传到PyPI：
+```bash
+# 上传到PyPI
+twine upload dist/*
+
+# 系统会提示输入你的PyPI用户名和密码
+```
+
+7. 验证安装：
+```bash
+# 创建新的虚拟环境测试
+python -m venv test_env
+source test_env/bin/activate  # Linux/Mac
+# 或
+test_env\Scripts\activate  # Windows
+
+# 通过pip安装
+pip install dataset_tools
+```
+
+注意事项：
+1. 确保包名 `dataset_tools` 在PyPI上是可用的（没有被其他人使用）
+2. 每次上传新版本时，需要在 `setup.py` 中更新版本号
+3. 建议先上传到测试PyPI：
+```bash
+twine upload --repository-url https://test.pypi.org/legacy/ dist/*
+```
+
+如果你想更新包：
+1. 修改 `setup.py` 中的版本号（例如从 '0.1.0' 改为 '0.1.1'）
+2. 重新构建：
+```bash
+# 清理旧的构建文件
+rm -rf build/ dist/ *.egg-info/
+
+# 重新构建
+python -m build
+
+# 上传新版本
+twine upload dist/*
+```
+
+需要我帮你执行这些步骤吗？或者你需要更详细的说明？

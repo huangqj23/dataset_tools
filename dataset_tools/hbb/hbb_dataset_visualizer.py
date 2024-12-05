@@ -167,7 +167,7 @@ class HBBDatasetVisualizer:
             cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
             
             # 绘制标签
-            label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
             text_w, text_h = label_size
             cv2.rectangle(image, (x1, y1 - text_h - baseline), 
                          (x1 + text_w, y1), color, -1)

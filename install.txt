@@ -1,4 +1,4 @@
-我来帮你说明如何将代码库上传到PyPI（Python Package Index）以支持通过pip安装。以下是具体步骤：
+将代码库上传到PyPI（Python Package Index）以支持通过pip安装。以下是具体步骤：
 
 1. 首先，确保你有一个PyPI账号
 ```bash

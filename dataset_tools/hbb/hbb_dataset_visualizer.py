@@ -5,6 +5,9 @@ import xml.etree.ElementTree as ET
 import json
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Union
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from tqdm import tqdm
 
 class HBBDatasetVisualizer:
     """数据集可视化工具，支持VOC、YOLO和COCO格式"""
@@ -27,17 +30,19 @@ class HBBDatasetVisualizer:
                  format: str,
                  save_dir: Optional[Union[str, Path]] = None,
                  show: bool = True,
-                 thickness: int = 2) -> Optional[np.ndarray]:
+                 thickness: int = 2,
+                 num_workers: int = 4) -> Optional[np.ndarray]:
         """
         可视化数据集标注。支持单张图片或整个数据集的可视化。
         
         Args:
             image_path: 图片路径或图片目录
-            label_path: 标注文件路径或标注目录
+            label_path: 标注文件路径或标注目录(COCO格式为json文件路径，其他格式为标注目录)
             format: 数据集格式，支持'voc'、'yolo'、'coco'
             save_dir: 保存目录，如果为None则不保存
             show: 是否显示图片
             thickness: 边框线宽
+            num_workers: 并行处理的线程数
             
         Returns:
             如果是单张图片，返回标注后的图片数组；如果是数据集，返回None
@@ -59,17 +64,16 @@ class HBBDatasetVisualizer:
         # 处理数据集目录
         if not image_path.is_dir():
             raise ValueError(f"图片路径不存在或无效: {image_path}")
-            
-        # 根据格式确定目录结构
+        
+        # 验证标注路径
         if format.lower() == 'coco':
             if not label_path.is_file():
                 raise ValueError(f"COCO格式需要提供标注文件: {label_path}")
-            label_file = label_path
         else:
             if not label_path.is_dir():
                 raise ValueError(f"标注目录不存在: {label_path}")
-                
-        # 遍历处理所有图片
+        
+        # 收集所有需要处理的图片
         image_patterns = [
             "*.[jJ][pP][gG]",      # jpg, JPG
             "*.[jJ][pP][eE][gG]",  # jpeg, JPEG
@@ -78,27 +82,54 @@ class HBBDatasetVisualizer:
             "*.[tT][iI][fF][fF]"   # tiff, TIFF
         ]
         
+        image_files = []
         for pattern in image_patterns:
-            for img_file in image_path.glob(pattern):
-                try:
-                    if format.lower() == 'coco':
-                        ann_file = label_file
-                    else:
-                        ann_file = label_path / f"{img_file.stem}{self._get_label_ext(format)}"
-                        if not ann_file.exists():
-                            print(f"警告: 未找到对应的标注文件 {ann_file}")
-                            continue
+            image_files.extend(list(image_path.glob(pattern)))
+        
+        if not image_files:
+            print("警告: 未找到任何图片文件")
+            return None
+        
+        # 创建处理任务
+        def process_image(img_file: Path) -> Tuple[bool, str]:
+            try:
+                if format.lower() == 'coco':
+                    ann_file = label_path  # COCO格式使用同一个标注文件
+                else:
+                    ann_file = label_path / f"{img_file.stem}{self._get_label_ext(format)}"
+                    if not ann_file.exists():
+                        return False, f"未找到对应的标注文件 {ann_file}"
                         
-                    self._visualize_single(
-                        img_file, 
-                        ann_file,
-                        format,
-                        save_dir / img_file.name if save_dir else None,
-                        show=False,  # 数据集模式下不显示
-                        thickness=thickness
-                    )
-                except Exception as e:
-                    print(f"处理 {img_file.name} 时出错: {str(e)}")
+                self._visualize_single(
+                    img_file, 
+                    ann_file,
+                    format,
+                    save_dir / img_file.name if save_dir else None,
+                    show=False,  # 数据集模式下不显示
+                    thickness=thickness
+                )
+                return True, ""
+            except Exception as e:
+                return False, f"处理出错: {str(e)}"
+        
+        # 使用线程池并行处理
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # 创建进度条
+            results = list(tqdm(
+                executor.map(process_image, image_files),
+                total=len(image_files),
+                desc="Processing images",
+                unit="img"
+            ))
+        
+        # 统计处理结果
+        success_count = sum(1 for success, _ in results if success)
+        print(f"\n处理完成: 成功 {success_count}/{len(image_files)} 张图片")
+        
+        # 显示错误信息
+        for success, message in results:
+            if not success and message:
+                print(f"错误: {message}")
                 
         return None
     

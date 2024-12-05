@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Union
 from tqdm import tqdm
 import cv2
+from concurrent.futures import ThreadPoolExecutor
 
 class OBBDatasetConverter:
     """旋转框数据集格式转换器，支持DOTA和COCO格式之间的转换"""
@@ -21,14 +22,16 @@ class OBBDatasetConverter:
     def dota_to_coco(self,
                      dota_dir: Union[str, Path],
                      output_path: Union[str, Path],
-                     image_ext: str = '.png') -> None:
+                     image_ext: str = '.png',
+                     num_workers: int = 4) -> None:
         """
         将DOTA格式数据集转换为COCO格式
         
         Args:
-            dota_dir: DOTA数据集根目录，包含images和labelTxt子目录
+            dota_dir: DOTA数据集图片目录
             output_path: COCO格式标注文件的保存路径
             image_ext: 图片文件扩展名
+            num_workers: 并行处理的线程数
         """
         dota_dir = Path(dota_dir)
         output_path = Path(output_path)
@@ -36,6 +39,13 @@ class OBBDatasetConverter:
         if not self.categories:
             raise ValueError("请先使用set_categories设置类别列表")
             
+        # 验证路径
+        if not dota_dir.is_dir():
+            raise ValueError(f"图片目录不存在: {dota_dir}")
+            
+        # 确保输出目录存在
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
         # 准备COCO格式数据结构
         coco_data = {
             "images": [],
@@ -53,79 +63,82 @@ class OBBDatasetConverter:
         if not image_dir.exists() or not label_dir.exists():
             raise ValueError(f"数据集目录结构不正确: {dota_dir}")
             
-        ann_id = 1
-        
-        # 遍历所有标注文件
-        for txt_file in tqdm(list(label_dir.glob('*.txt')), desc="Converting DOTA to COCO"):
-            image_id = len(coco_data["images"]) + 1
-            image_file = txt_file.stem + image_ext
-            image_path = image_dir / image_file
-            
-            # 读取图片尺寸
+        def process_txt(txt_file: Path, image_id: int) -> Tuple[Dict, List[Dict]]:
             try:
+                image_file = txt_file.stem + image_ext
+                image_path = image_dir / image_file
+                
+                # 读取图片尺寸
                 img = cv2.imread(str(image_path))
                 if img is None:
-                    print(f"Warning: Cannot read image {image_path}")
-                    continue
+                    return None, []
                 height, width = img.shape[:2]
-            except Exception as e:
-                print(f"Error reading image {image_path}: {str(e)}")
-                continue
-            
-            # 添加图片信息
-            coco_data["images"].append({
-                "id": image_id,
-                "file_name": image_file,
-                "height": height,
-                "width": width
-            })
-            
-            # 解析标注文件
-            try:
+                
+                # 准备图片信息
+                image_info = {
+                    "id": image_id,
+                    "file_name": image_file,
+                    "height": height,
+                    "width": width
+                }
+                
+                # 读取标注信息
+                annotations = []
                 with open(txt_file, 'r', encoding='utf-8') as f:
-                    # 跳过第一行（可能包含标题）
-                    next(f)
+                    next(f)  # 跳过第一行
                     for line in f:
                         parts = line.strip().split()
                         if len(parts) < 9:
                             continue
                             
-                        # 解析坐标点和类别
                         points = list(map(float, parts[:8]))
                         category = parts[8]
                         difficulty = int(parts[9]) if len(parts) > 9 else 0
                         
-                        # 检查类别是否在预定义列表中
                         if category not in self.category_to_id:
                             continue
                             
-                        # 转换为COCO格式
                         x_coords = points[0::2]
                         y_coords = points[1::2]
-                        
-                        # 计算边界框
                         x_min, x_max = min(x_coords), max(x_coords)
                         y_min, y_max = min(y_coords), max(y_coords)
                         w = x_max - x_min
                         h = y_max - y_min
                         
-                        # 添加标注
-                        coco_data["annotations"].append({
-                            "id": ann_id,
+                        annotations.append({
                             "image_id": image_id,
                             "category_id": self.category_to_id[category],
-                            "segmentation": [points],  # 多边形坐标
-                            "bbox": [x_min, y_min, w, h],  # 水平外接矩形
-                            "bbox_mode": "poly",  # 表示这是一个多边形标注
+                            "segmentation": [points],
+                            "bbox": [x_min, y_min, w, h],
+                            "bbox_mode": "poly",
                             "area": self._polygon_area(points),
                             "iscrowd": 0,
                             "difficulty": difficulty
                         })
-                        ann_id += 1
                         
+                return image_info, annotations
             except Exception as e:
-                print(f"Error processing {txt_file}: {str(e)}")
-                continue
+                print(f"处理 {txt_file} 时出错: {str(e)}")
+                return None, []
+        
+        # 使用线程池并行处理
+        txt_files = list(label_dir.glob('*.txt'))
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            for image_id, txt_file in enumerate(txt_files, start=1):
+                future = executor.submit(process_txt, txt_file, image_id)
+                futures.append(future)
+            
+            # 收集结果
+            ann_id = 1
+            for future in tqdm(futures, desc="Converting DOTA to COCO"):
+                image_info, annotations = future.result()
+                if image_info:
+                    coco_data["images"].append(image_info)
+                    for ann in annotations:
+                        ann["id"] = ann_id
+                        coco_data["annotations"].append(ann)
+                        ann_id += 1
         
         # 保存COCO格式数据
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -133,9 +146,9 @@ class OBBDatasetConverter:
             json.dump(coco_data, f, indent=2)
     
     def coco_to_dota(self,
-                     coco_path: str,
-                     image_dir: str,
-                     output_dir: str) -> None:
+                     coco_path: Union[str, Path],
+                     image_dir: Union[str, Path],
+                     output_dir: Union[str, Path]) -> None:
         """
         将COCO格式数据集转换为DOTA格式
         
@@ -144,6 +157,19 @@ class OBBDatasetConverter:
             image_dir: 图片目录路径
             output_dir: 输出目录路径
         """
+        coco_path = Path(coco_path)
+        image_dir = Path(image_dir)
+        output_dir = Path(output_dir)
+        
+        # 验证路径
+        if not coco_path.is_file():
+            raise ValueError(f"COCO标注文件不存在: {coco_path}")
+        if not image_dir.is_dir():
+            raise ValueError(f"图片目录不存在: {image_dir}")
+        
+        # 创建输出目录
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
         # 读取COCO数据
         with open(coco_path, 'r', encoding='utf-8') as f:
             coco_data = json.load(f)
@@ -162,19 +188,13 @@ class OBBDatasetConverter:
                 annotations_by_image[image_id] = []
             annotations_by_image[image_id].append(ann)
         
-        # 创建输出目录
-        output_image_dir = os.path.join(output_dir, 'images')
-        output_label_dir = os.path.join(output_dir, 'labelTxt')
-        os.makedirs(output_image_dir, exist_ok=True)
-        os.makedirs(output_label_dir, exist_ok=True)
-        
         # 处理每张图片
         for image_id, annotations in tqdm(annotations_by_image.items(), desc="Converting COCO to DOTA"):
             image_name = image_id_to_name[image_id]
             base_name = os.path.splitext(image_name)[0]
             
             # 写入标注文件
-            with open(os.path.join(output_label_dir, f"{base_name}.txt"), 'w', encoding='utf-8') as f:
+            with open(os.path.join(output_dir, 'labelTxt', f"{base_name}.txt"), 'w', encoding='utf-8') as f:
                 # 写入标题行
                 f.write('imagesource:GoogleEarth\n')
                 # 写入标注
@@ -196,7 +216,7 @@ class OBBDatasetConverter:
             
             # 复制图片文件
             src_image = os.path.join(image_dir, image_name)
-            dst_image = os.path.join(output_image_dir, image_name)
+            dst_image = os.path.join(output_dir, 'images', image_name)
             if os.path.exists(src_image):
                 import shutil
                 shutil.copy2(src_image, dst_image)

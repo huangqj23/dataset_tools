@@ -4,29 +4,45 @@ import xml.etree.ElementTree as ET
 import cv2
 from tqdm import tqdm
 from glob import glob
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union, Optional
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 class HBBDatasetConverter:
     def __init__(self):
         self.supported_formats = ['yolo', 'coco', 'voc']
         
-    def convert(self, source_dir: str, source_format: str, 
-                target_format: str, output_path: str,
-                classes_file: str = None):
+    def convert(self, source_dir: Union[str, Path], 
+                source_format: str, 
+                target_format: str, 
+                output_path: Union[str, Path],
+                classes_file: Optional[Union[str, Path]] = None):
         """
         转换数据集格式
         
         Args:
-            source_dir: 源数据集目录
+            source_dir: 源数据集目录(图片目录)
             source_format: 源格式 ('yolo', 'coco', 'voc')
             target_format: 目标格式 ('yolo', 'coco', 'voc')
-            output_path: 输出路径
+            output_path: 输出路径(COCO格式为json文件路径，其他格式为输出目录)
             classes_file: 类别文件路径（YOLO格式需要）
         """
+        source_dir = Path(source_dir)
+        output_path = Path(output_path)
+        if classes_file:
+            classes_file = Path(classes_file)
+        
         if source_format not in self.supported_formats or target_format not in self.supported_formats:
             raise ValueError(f"不支持的格式。支持的格式为: {self.supported_formats}")
-            
+        
+        # 验证路径
+        if not source_dir.is_dir():
+            raise ValueError(f"源数据集目录不存在: {source_dir}")
+        
+        if source_format == 'yolo' and (not classes_file or not classes_file.is_file()):
+            raise ValueError("YOLO格式需要提供classes.txt文件")
+        
         # 读取数据集
         if source_format == 'yolo':
             dataset = self._read_yolo(source_dir, classes_file)
@@ -34,17 +50,29 @@ class HBBDatasetConverter:
             dataset = self._read_coco(source_dir)
         else:  # VOC
             dataset = self._read_voc(source_dir)
-            
+        
         # 转换并保存
         if target_format == 'yolo':
+            if not output_path.parent.exists():
+                output_path.parent.mkdir(parents=True)
             self._save_yolo(dataset, output_path)
         elif target_format == 'coco':
+            if not output_path.parent.exists():
+                output_path.parent.mkdir(parents=True)
             self._save_coco(dataset, output_path)
         else:  # VOC
+            output_path.mkdir(parents=True, exist_ok=True)
             self._save_voc(dataset, output_path)
 
-    def _read_yolo(self, yolo_dir: str, classes_file: str) -> Dict:
-        """读取YOLO格式数据集"""
+    def _read_yolo(self, yolo_dir: str, classes_file: str, num_workers: int = 4) -> Dict:
+        """
+        读取YOLO格式数据集
+        
+        Args:
+            yolo_dir: YOLO数据集目录
+            classes_file: 类别文件路径
+            num_workers: 并行处理的线程数
+        """
         dataset = {
             'images': [],
             'annotations': [],
@@ -61,45 +89,83 @@ class HBBDatasetConverter:
                     'supercategory': 'none'
                 })
         
-        # 读取图片和标注
-        ann_id = 0
-        img_files = list(Path(yolo_dir).glob("*.jpg")) + list(Path(yolo_dir).glob("*.png"))
+        # 收集所有图片文件
+        image_patterns = [
+            "*.[jJ][pP][gG]",      # jpg, JPG
+            "*.[jJ][pP][eE][gG]",  # jpeg, JPEG
+            "*.[pP][nN][gG]",      # png, PNG
+            "*.[tT][iI][fF]",      # tif, TIF
+            "*.[tT][iI][fF][fF]"   # tiff, TIFF
+        ]
         
-        for img_id, img_path in enumerate(tqdm(img_files)):
-            img = cv2.imread(str(img_path))
-            height, width = img.shape[:2]
+        img_files = []
+        for pattern in image_patterns:
+            img_files.extend(list(Path(yolo_dir).glob(pattern)))
             
-            dataset['images'].append({
-                'id': img_id,
-                'file_name': img_path.name,
-                'width': width,
-                'height': height,
-                'path': str(img_path)
-            })
+        if not img_files:
+            raise ValueError(f"未找到任何图片文件: {yolo_dir}")
             
-            txt_path = img_path.with_suffix('.txt')
-            if not txt_path.exists():
-                continue
+        # 创建处理任务
+        def process_image(img_id: int, img_path: Path) -> Tuple[Dict, List[Dict]]:
+            try:
+                # 读取图片信息
+                img = cv2.imread(str(img_path))
+                if img is None:
+                    return None, []
+                height, width = img.shape[:2]
                 
-            with open(txt_path, 'r') as f:
-                for line in f.readlines():
-                    cls_id, x_center, y_center, w, h = map(float, line.strip().split())
-                    
-                    x = (x_center - w/2) * width
-                    y = (y_center - h/2) * height
-                    w = w * width
-                    h = h * height
-                    
-                    dataset['annotations'].append({
-                        'id': ann_id,
-                        'image_id': img_id,
-                        'category_id': int(cls_id),
-                        'bbox': [x, y, w, h],
-                        'area': w * h,
-                        'iscrowd': 0
-                    })
-                    ann_id += 1
-                    
+                image_info = {
+                    'id': img_id,
+                    'file_name': img_path.name,
+                    'width': width,
+                    'height': height,
+                    'path': str(img_path)
+                }
+                
+                # 读取标注信息
+                annotations = []
+                txt_path = img_path.with_suffix('.txt')
+                if txt_path.exists():
+                    with open(txt_path, 'r') as f:
+                        for line in f:
+                            cls_id, x_center, y_center, w, h = map(float, line.strip().split())
+                            
+                            x = (x_center - w/2) * width
+                            y = (y_center - h/2) * height
+                            w = w * width
+                            h = h * height
+                            
+                            annotations.append({
+                                'image_id': img_id,
+                                'category_id': int(cls_id),
+                                'bbox': [x, y, w, h],
+                                'area': w * h,
+                                'iscrowd': 0
+                            })
+                            
+                return image_info, annotations
+            except Exception as e:
+                print(f"处理 {img_path.name} 时出错: {str(e)}")
+                return None, []
+        
+        # 使用线程池并行处理
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            for img_id, img_path in enumerate(img_files):
+                future = executor.submit(process_image, img_id, img_path)
+                futures.append(future)
+            
+            # 收集结果
+            ann_id = 0
+            for future in tqdm(futures, desc="Processing images"):
+                image_info, annotations = future.result()
+                if image_info:
+                    dataset['images'].append(image_info)
+                    for ann in annotations:
+                        ann['id'] = ann_id
+                        dataset['annotations'].append(ann)
+                        ann_id += 1
+                        
         return dataset
 
     def _read_coco(self, coco_path: str) -> Dict:
@@ -107,56 +173,93 @@ class HBBDatasetConverter:
         with open(coco_path, 'r') as f:
             return json.load(f)
 
-    def _read_voc(self, voc_dir: str) -> Dict:
-        """读取VOC格式数据集"""
+    def _read_voc(self, voc_dir: str, num_workers: int = 4) -> Dict:
+        """
+        读取VOC格式数据集
+        
+        Args:
+            voc_dir: VOC数据集目录
+            num_workers: 并行处理的线程数
+        """
         dataset = {
             'images': [],
             'annotations': [],
             'categories': set()
         }
         
-        ann_id = 0
-        for img_id, xml_file in enumerate(tqdm(list(Path(voc_dir).glob("*.xml")))):
-            tree = ET.parse(xml_file)
-            root = tree.getroot()
+        # 收集所有XML文件
+        xml_files = list(Path(voc_dir).glob("*.xml"))
+        if not xml_files:
+            raise ValueError(f"未找到任何XML文件: {voc_dir}")
             
-            # 读取图片信息
-            filename = root.find('filename').text
-            size = root.find('size')
-            width = int(size.find('width').text)
-            height = int(size.find('height').text)
+        # 创建处理任务
+        def process_xml(img_id: int, xml_file: Path) -> Tuple[Dict, List[Dict], List[str]]:
+            try:
+                tree = ET.parse(xml_file)
+                root = tree.getroot()
+                
+                # 读取图片信息
+                filename = root.find('filename').text
+                size = root.find('size')
+                width = int(size.find('width').text)
+                height = int(size.find('height').text)
+                
+                image_info = {
+                    'id': img_id,
+                    'file_name': filename,
+                    'width': width,
+                    'height': height,
+                    'path': str(Path(voc_dir) / filename)
+                }
+                
+                # 读取标注信息
+                annotations = []
+                categories = set()
+                
+                for obj in root.findall('object'):
+                    name = obj.find('name').text
+                    categories.add(name)
+                    
+                    bbox = obj.find('bndbox')
+                    xmin = float(bbox.find('xmin').text)
+                    ymin = float(bbox.find('ymin').text)
+                    xmax = float(bbox.find('xmax').text)
+                    ymax = float(bbox.find('ymax').text)
+                    
+                    w = xmax - xmin
+                    h = ymax - ymin
+                    
+                    annotations.append({
+                        'image_id': img_id,
+                        'category_name': name,
+                        'bbox': [xmin, ymin, w, h],
+                        'area': w * h,
+                        'iscrowd': 0
+                    })
+                    
+                return image_info, annotations, list(categories)
+            except Exception as e:
+                print(f"处理 {xml_file.name} 时出错: {str(e)}")
+                return None, [], []
+        
+        # 使用线程池并行处理
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            for img_id, xml_file in enumerate(xml_files):
+                future = executor.submit(process_xml, img_id, xml_file)
+                futures.append(future)
             
-            dataset['images'].append({
-                'id': img_id,
-                'file_name': filename,
-                'width': width,
-                'height': height,
-                'path': str(Path(voc_dir) / filename)
-            })
-            
-            # 读取标注信息
-            for obj in root.findall('object'):
-                name = obj.find('name').text
-                dataset['categories'].add(name)
-                
-                bbox = obj.find('bndbox')
-                xmin = float(bbox.find('xmin').text)
-                ymin = float(bbox.find('ymin').text)
-                xmax = float(bbox.find('xmax').text)
-                ymax = float(bbox.find('ymax').text)
-                
-                w = xmax - xmin
-                h = ymax - ymin
-                
-                dataset['annotations'].append({
-                    'id': ann_id,
-                    'image_id': img_id,
-                    'category_name': name,
-                    'bbox': [xmin, ymin, w, h],
-                    'area': w * h,
-                    'iscrowd': 0
-                })
-                ann_id += 1
+            # 收集结果
+            ann_id = 0
+            for future in tqdm(futures, desc="Processing annotations"):
+                image_info, annotations, categories = future.result()
+                if image_info:
+                    dataset['images'].append(image_info)
+                    for ann in annotations:
+                        ann['id'] = ann_id
+                        dataset['annotations'].append(ann)
+                        ann_id += 1
+                    dataset['categories'].update(categories)
         
         # 转换categories为列表格式
         categories = []
@@ -226,7 +329,7 @@ class HBBDatasetConverter:
             # 创建XML根节点
             root = ET.Element('annotation')
             
-            # 添加基本信息
+            # 添加基本信��
             ET.SubElement(root, 'filename').text = img['file_name']
             
             size = ET.SubElement(root, 'size')

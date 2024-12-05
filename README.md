@@ -26,13 +26,13 @@ pip install dataset-tools
 - VOC (.xml)
 - YOLO (.txt)
 
-#### 功能展示
+<!-- #### 功能展示 -->
 
-| 功能 | 输入 | 输出 |
+<!-- | 功能 | 输入 | 输出 |
 |:---:|:---:|:---:|
 | 可视化 | ![输入](docs/images/hbb_vis_input.jpg) | ![输出](docs/images/hbb_vis_output.jpg) |
 | 目标剪切 | ![输入](docs/images/hbb_crop_input.jpg) | ![输出](docs/images/hbb_crop_output.jpg) |
-| 格式转换 | ![转换](docs/images/hbb_convert.png) |
+| 格式转换 | ![转换](docs/images/hbb_convert.png) | -->
 
 ```python
 from dataset_tools.hbb import HBBDatasetConverter, HBBDatasetVisualizer, HBBDatasetCropper

@@ -128,7 +128,19 @@ class HBBDatasetEvaluator:
         coco_gt.dataset = gt_coco
         coco_gt.createIndex()
         
-        coco_dt = coco_gt.loadRes(pred_coco['annotations'])
+        # 确保预测结果中包含必要的字段
+        for ann in pred_coco['annotations']:
+            if 'score' not in ann:
+                ann['score'] = 1.0
+            if 'segmentation' not in ann:
+                ann['segmentation'] = []
+        
+        # 创建临时JSON文件
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as f:
+            json.dump(pred_coco['annotations'], f)
+            f.flush()
+            coco_dt = coco_gt.loadRes(f.name)
         
         # 创建评估器
         coco_eval = COCOeval(coco_gt, coco_dt, 'bbox')
@@ -348,12 +360,14 @@ class HBBDatasetEvaluator:
         
         # 读取标注
         annotations = []
+        ann_id = 1  # 添加标注ID
         with open(txt_path, 'r') as f:
             for line in f:
-                if line.strip():
+                if line.strip() and not line.startswith('#'):
                     data = line.strip().split()
                     class_id = int(data[0])
                     x_center, y_center, w, h = map(float, data[1:5])
+                    score = float(data[5]) if len(data) > 5 else 1.0  # 添加置信度
                     
                     # 转换为绝对坐标
                     w = w * width
@@ -362,12 +376,16 @@ class HBBDatasetEvaluator:
                     y = y_center * height - h/2
                     
                     annotations.append({
+                        'id': ann_id,  # 添加标注ID
                         'image_id': img_id,
                         'category_id': class_id,
                         'bbox': [x, y, w, h],
                         'area': w * h,
-                        'iscrowd': 0
+                        'iscrowd': 0,
+                        'score': score,  # 添加置信度
+                        'segmentation': []  # 添加分割字段
                     })
+                    ann_id += 1
         
         return image_info, annotations
     

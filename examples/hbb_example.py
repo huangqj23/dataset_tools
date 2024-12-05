@@ -1,4 +1,5 @@
 from dataset_tools.hbb.hbb_dataset_visualizer import HBBDatasetVisualizer
+from dataset_tools.hbb.hbb_dataset_cropper import HBBDatasetCropper
 
 if __name__ == '__main__':
     
@@ -27,18 +28,33 @@ if __name__ == '__main__':
         'A20': 'SU-24'
     }
     
-    visualizer = HBBDatasetVisualizer()
+    # vis
+    # visualizer = HBBDatasetVisualizer()
     
-    # 设置类别名称（对YOLO格式必需，其他格式可选）
-    class_names = list(mar20_aircraft_mapping.values())
-    visualizer.set_class_names(class_names)
+    # # 设置类别名称（对YOLO格式必需，其他格式可选）
+    # class_names = list(mar20_aircraft_mapping.values())
+    # visualizer.set_class_names(class_names)
 
-    # 可视化单张图片
-    visualizer.visualize(
+    # # 可视化单张图片
+    # visualizer.visualize(
+        # image_path='/data1/DATA_126/hqj/MAR20/JPEGImages/',
+        # label_path='/data1/DATA_126/hqj/MAR20/Annotations/hbb/',
+        # format='voc',
+        # save_dir='/data1/DATA_126/hqj/MAR20/vis/',
+    #     num_workers=10
+    # )
+
+    # crop
+    # 使用示例
+    cropper = HBBDatasetCropper()
+    
+    # VOC格式
+    cropper.crop(
         image_path='/data1/DATA_126/hqj/MAR20/JPEGImages/',
         label_path='/data1/DATA_126/hqj/MAR20/Annotations/hbb/',
+        output_dir='/data1/DATA_126/hqj/MAR20/crops/',
         format='voc',
-        save_dir='/data1/DATA_126/hqj/MAR20/vis/',
         num_workers=10
     )
+    
     

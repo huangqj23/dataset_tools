@@ -134,13 +134,37 @@ class HBBDatasetEvaluator:
                 ann['score'] = 1.0
             if 'segmentation' not in ann:
                 ann['segmentation'] = []
+            if 'id' not in ann:
+                ann['id'] = ann['image_id'] * 100000 + ann.get('category_id', 0)
+        
+        # 检查是否有预测结果
+        if not pred_coco['annotations']:
+            print("警告: 没有预测结果!")
+            return {
+                'AP@0.5:0.95': 0.0,
+                'AP@0.5': 0.0,
+                'AP@0.75': 0.0,
+                'AP_small': 0.0,
+                'AP_medium': 0.0,
+                'AP_large': 0.0,
+                'AR_max1': 0.0,
+                'AR_max10': 0.0,
+                'AR_max100': 0.0,
+                'precision': [],
+                'recall': []
+            }
         
         # 创建临时JSON文件
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as f:
             json.dump(pred_coco['annotations'], f)
             f.flush()
-            coco_dt = coco_gt.loadRes(f.name)
+            try:
+                coco_dt = coco_gt.loadRes(f.name)
+            except Exception as e:
+                print(f"COCO评估出错: {str(e)}")
+                print("预测结果示例:", pred_coco['annotations'][0])
+                raise
         
         # 创建评估器
         coco_eval = COCOeval(coco_gt, coco_dt, 'bbox')
@@ -150,15 +174,15 @@ class HBBDatasetEvaluator:
         
         # 提取评估结果
         metrics = {
-            'AP@0.5:0.95': coco_eval.stats[0],  # AP @[ IoU=0.50:0.95 ]
-            'AP@0.5': coco_eval.stats[1],       # AP @[ IoU=0.50 ]
-            'AP@0.75': coco_eval.stats[2],      # AP @[ IoU=0.75 ]
-            'AP_small': coco_eval.stats[3],     # AP @[ area=small ]
-            'AP_medium': coco_eval.stats[4],    # AP @[ area=medium ]
-            'AP_large': coco_eval.stats[5],     # AP @[ area=large ]
-            'AR_max1': coco_eval.stats[6],      # AR @[ maxDets=1 ]
-            'AR_max10': coco_eval.stats[7],     # AR @[ maxDets=10 ]
-            'AR_max100': coco_eval.stats[8],    # AR @[ maxDets=100 ]
+            'AP@0.5:0.95': coco_eval.stats[0],
+            'AP@0.5': coco_eval.stats[1],
+            'AP@0.75': coco_eval.stats[2],
+            'AP_small': coco_eval.stats[3],
+            'AP_medium': coco_eval.stats[4],
+            'AP_large': coco_eval.stats[5],
+            'AR_max1': coco_eval.stats[6],
+            'AR_max10': coco_eval.stats[7],
+            'AR_max100': coco_eval.stats[8],
             'precision': coco_eval.eval['precision'].tolist(),
             'recall': coco_eval.eval['recall'].tolist()
         }
@@ -349,6 +373,8 @@ class HBBDatasetEvaluator:
         # 读取图片尺寸
         import cv2
         img = cv2.imread(str(img_path))
+        if img is None:
+            raise ValueError(f"无法读取图片: {img_path}")
         height, width = img.shape[:2]
         
         image_info = {
@@ -360,32 +386,41 @@ class HBBDatasetEvaluator:
         
         # 读取标注
         annotations = []
-        ann_id = 1  # 添加标注ID
-        with open(txt_path, 'r') as f:
-            for line in f:
-                if line.strip() and not line.startswith('#'):
-                    data = line.strip().split()
-                    class_id = int(data[0])
-                    x_center, y_center, w, h = map(float, data[1:5])
-                    score = float(data[5]) if len(data) > 5 else 1.0  # 添加置信度
-                    
-                    # 转换为绝对坐标
-                    w = w * width
-                    h = h * height
-                    x = x_center * width - w/2
-                    y = y_center * height - h/2
-                    
-                    annotations.append({
-                        'id': ann_id,  # 添加标注ID
-                        'image_id': img_id,
-                        'category_id': class_id,
-                        'bbox': [x, y, w, h],
-                        'area': w * h,
-                        'iscrowd': 0,
-                        'score': score,  # 添加置信度
-                        'segmentation': []  # 添加分割字段
-                    })
-                    ann_id += 1
+        ann_id = img_id * 100000  # 使用更大的间隔避免ID冲突
+        
+        try:
+            with open(txt_path, 'r') as f:
+                for line in f:
+                    if line.strip() and not line.startswith('#'):
+                        try:
+                            data = line.strip().split()
+                            class_id = int(data[0])
+                            x_center, y_center, w, h = map(float, data[1:5])
+                            score = float(data[5]) if len(data) > 5 else 1.0
+                            
+                            # 转换为绝对坐标
+                            w = w * width
+                            h = h * height
+                            x = x_center * width - w/2
+                            y = y_center * height - h/2
+                            
+                            annotations.append({
+                                'id': ann_id,
+                                'image_id': img_id,
+                                'category_id': class_id,
+                                'bbox': [x, y, w, h],
+                                'area': w * h,
+                                'iscrowd': 0,
+                                'score': score,
+                                'segmentation': []
+                            })
+                            ann_id += 1
+                        except Exception as e:
+                            print(f"警告: 解析行 '{line.strip()}' 时出错: {str(e)}")
+                            continue
+        except Exception as e:
+            print(f"警告: 读取文件 {txt_path} 时出错: {str(e)}")
+            return image_info, []
         
         return image_info, annotations
     

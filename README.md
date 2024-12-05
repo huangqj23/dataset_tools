@@ -215,3 +215,72 @@ x1 y1 x2 y2 x3 y3 x4 y4 category difficulty
 |:---:|:---:|:---:|
 | 水平框(HBB) | ![原图](assets/102.jpg) | ![剪切](assets/102_crop.png) |
 <!-- | 旋转框(OBB) | ![原图](docs/images/obb_crop_origin.jpg) | ![剪切](docs/images/obb_crops.jpg) | -->
+
+### 数据集统计结果
+| 类型 | 结果 |
+|:---:|:---:|
+| 图像尺寸 | ![统计](assets/image_size_distribution.png) |
+| 类别分布 | ![统计](assets/category_distribution.png) |
+| BBOX尺寸 | ![统计](assets/bbox_size_distribution.png) |
+| BBOX宽高比 | ![统计](assets/aspect_ratio_distribution.png) |
+| BBOX聚类 | ![统计](assets/bbox_clusters.png) |
+
+最终统计结果JSON文件
+```json
+{
+  "image_count": 3842,
+  "bbox_count": 22341,
+  "category_count": 20,
+  "image_size": {
+    "width": {
+      "min": 590,
+      "max": 1389,
+      "mean": 805.0028630921395
+    },
+    "height": {
+      "min": 549,
+      "max": 989,
+      "mean": 794.7824049973972
+    }
+  },
+  "bbox_size": {
+    "width": {
+      "min": 2.0,
+      "max": 520.0,
+      "mean": 101.67740924757173
+    },
+    "height": {
+      "min": 4.0,
+      "max": 566.0,
+      "mean": 100.87780314220491
+    }
+  },
+  "aspect_ratio": {
+    "min": 0.36363636363636365,
+    "max": 3.7777777777777777,
+    "mean": 1.0415244429032822
+  },
+  "categories": {
+    "A2": 1729,
+    "A10": 924,
+    "A3": 1176,
+    "A19": 1236,
+    "A1": 1646,
+    "A13": 1652,
+    "A20": 981,
+    "A15": 618,
+    "A16": 2632,
+    "A17": 1397,
+    "A12": 702,
+    "A5": 1262,
+    "A14": 1778,
+    "A7": 680,
+    "A9": 1086,
+    "A4": 642,
+    "A18": 308,
+    "A8": 944,
+    "A11": 507,
+    "A6": 441
+  }
+}
+```

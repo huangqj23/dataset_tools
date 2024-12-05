@@ -216,7 +216,7 @@ x1 y1 x2 y2 x3 y3 x4 y4 category difficulty
 | 水平框(HBB) | ![原图](assets/102.jpg) | ![剪切](assets/102_crop.png) |
 <!-- | 旋转框(OBB) | ![原图](docs/images/obb_crop_origin.jpg) | ![剪切](docs/images/obb_crops.jpg) | -->
 
-### 数据集统计结果
+### 数据集统计结果(以MAR20数据集为例)
 | 类型 | 结果 |
 |:---:|:---:|
 | 图像尺寸 | ![统计](assets/image_size_distribution.png) |

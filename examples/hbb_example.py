@@ -1,4 +1,4 @@
-from ..dataset_tools.hbb.hbb_dataset_visualizer import HBBDatasetVisualizer
+from dataset_tools.hbb.hbb_dataset_visualizer import HBBDatasetVisualizer
 
 if __name__ == '__main__':
     
@@ -35,9 +35,10 @@ if __name__ == '__main__':
 
     # 可视化单张图片
     visualizer.visualize(
-        image_path='path/to/image.jpg',
-        label_path='path/to/label.xml',
+        image_path='/data1/DATA_126/hqj/MAR20/JPEGImages/',
+        label_path='/data1/DATA_126/hqj/MAR20/Annotations/hbb/',
         format='voc',
-        save_path='output.jpg'
+        save_dir='/data1/DATA_126/hqj/MAR20/vis/',
+        num_workers=10
     )
     

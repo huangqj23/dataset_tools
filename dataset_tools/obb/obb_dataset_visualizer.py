@@ -185,7 +185,7 @@ class OBBDatasetVisualizer:
             # 绘制标签背景
             label_size, baseline = cv2.getTextSize(label_text, 
                                                  cv2.FONT_HERSHEY_SIMPLEX,
-                                                 font_scale, 1)
+                                                 font_scale, 2)
             text_w, text_h = label_size
             cv2.rectangle(image, 
                          (x_min, y_min - text_h - baseline),
@@ -196,7 +196,7 @@ class OBBDatasetVisualizer:
             cv2.putText(image, label_text,
                        (x_min, y_min - baseline),
                        cv2.FONT_HERSHEY_SIMPLEX,
-                       font_scale, (255, 255, 255), 1)
+                       font_scale, (255, 255, 255), 2)
         
         if save_path:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)

@@ -21,13 +21,76 @@ class OBBDatasetVisualizer:
                       for name in class_names}
     
     def visualize(self,
-                 image_path: str,
-                 label_path: str,
+                 image_path: Union[str, Path],
+                 label_path: Union[str, Path],
                  format: str,
-                 save_path: Optional[str] = None,
+                 save_dir: Optional[Union[str, Path]] = None,
                  show: bool = True,
-                 thickness: int = 2,
-                 font_scale: float = 0.5) -> np.ndarray:
+                 thickness: int = 2) -> Optional[np.ndarray]:
+        """
+        可视化数据集标注。支持单张图片或整个数据集的可视化。
+        """
+        image_path = Path(image_path)
+        label_path = Path(label_path)
+        if save_dir:
+            save_dir = Path(save_dir)
+            save_dir.mkdir(parents=True, exist_ok=True)
+
+        # 判断是单张图片还是数据集
+        if image_path.is_file():
+            return self._visualize_single(
+                image_path, label_path, format, 
+                save_dir / image_path.name if save_dir else None,
+                show, thickness
+            )
+        
+        # 处理数据集目录
+        if not image_path.is_dir():
+            raise ValueError(f"图片路径不存在或无效: {image_path}")
+            
+        # 根据格式确定目录结构
+        if format.lower() == 'dota':
+            if not label_path.is_dir():
+                raise ValueError(f"标注目录不存在: {label_path}")
+        
+        # 遍历处理所有图片
+        image_patterns = [
+            "*.[jJ][pP][gG]",      # jpg, JPG
+            "*.[jJ][pP][eE][gG]",  # jpeg, JPEG
+            "*.[pP][nN][gG]",      # png, PNG
+            "*.[tT][iI][fF]",      # tif, TIF
+            "*.[tT][iI][fF][fF]"   # tiff, TIFF
+        ]
+        
+        for pattern in image_patterns:
+            for img_file in image_path.glob(pattern):
+                try:
+                    ann_file = label_path / f"{img_file.stem}.txt"  # DOTA格式使用txt
+                    if not ann_file.exists():
+                        print(f"警告: 未找到对应的标注文件 {ann_file}")
+                        continue
+                        
+                    self._visualize_single(
+                        img_file, 
+                        ann_file,
+                        format,
+                        save_dir / img_file.name if save_dir else None,
+                        show=False,  # 数据集模式下不显示
+                        thickness=thickness
+                    )
+                except Exception as e:
+                    print(f"处理 {img_file.name} 时出错: {str(e)}")
+                    
+        return None
+    
+    def _visualize_single(self,
+                         image_path: Path,
+                         label_path: Path,
+                         format: str,
+                         save_path: Optional[Path] = None,
+                         show: bool = True,
+                         thickness: int = 2,
+                         font_scale: float = 0.5) -> np.ndarray:
         """
         可视化单张图片的标注
         
@@ -44,7 +107,7 @@ class OBBDatasetVisualizer:
             标注后的图片数组
         """
         # 读取图片
-        image = cv2.imread(image_path)
+        image = cv2.imread(str(image_path))
         if image is None:
             raise ValueError(f"无法读取图片: {image_path}")
         
@@ -65,7 +128,7 @@ class OBBDatasetVisualizer:
             # 绘制多边形
             cv2.polylines(image, [points], True, color, thickness)
             
-            # 计算标签位置（使用多边形���左上角）
+            # 计算标签位置（使用多边形左上角）
             label_text = f"{label}"
             if difficulty > 0:
                 label_text += f" (diff:{difficulty})"
@@ -99,69 +162,6 @@ class OBBDatasetVisualizer:
             cv2.destroyAllWindows()
             
         return image
-    
-    def visualize_dataset(self,
-                         dataset_dir: str,
-                         format: str,
-                         save_dir: Optional[str] = None,
-                         image_ext: str = '.png') -> None:
-        """
-        批量可视化数据集
-        
-        Args:
-            dataset_dir: 数据集根目录
-            format: 数据集格式
-            save_dir: 可视化结果保存目录
-            image_ext: 图片文件扩展名
-        """
-        if format.lower() == 'dota':
-            image_dir = os.path.join(dataset_dir, 'images')
-            label_dir = os.path.join(dataset_dir, 'labelTxt')
-            
-            # 遍历所有标注文件
-            for txt_file in os.listdir(label_dir):
-                if not txt_file.endswith('.txt'):
-                    continue
-                    
-                base_name = txt_file[:-4]
-                image_path = os.path.join(image_dir, base_name + image_ext)
-                label_path = os.path.join(label_dir, txt_file)
-                
-                if save_dir:
-                    save_path = os.path.join(save_dir, base_name + image_ext)
-                else:
-                    save_path = None
-                    
-                try:
-                    self.visualize(image_path, label_path, format,
-                                 save_path=save_path, show=False)
-                except Exception as e:
-                    print(f"处理 {base_name} 时出错: {str(e)}")
-                    
-        elif format.lower() == 'coco':
-            image_dir = os.path.join(dataset_dir, 'images')
-            label_path = os.path.join(dataset_dir, 'annotations.json')
-            
-            # 读取COCO标注文件
-            with open(label_path, 'r') as f:
-                coco_data = json.load(f)
-            
-            # 遍历所有图片
-            for img_info in coco_data['images']:
-                image_path = os.path.join(image_dir, img_info['file_name'])
-                
-                if save_dir:
-                    save_path = os.path.join(save_dir, img_info['file_name'])
-                else:
-                    save_path = None
-                    
-                try:
-                    self.visualize(image_path, label_path, format,
-                                 save_path=save_path, show=False)
-                except Exception as e:
-                    print(f"处理 {img_info['file_name']} 时出错: {str(e)}")
-        else:
-            raise ValueError(f"不支持的数据集格式: {format}")
     
     def _parse_dota(self, txt_path: str) -> Tuple[List[List[float]], List[str], List[int]]:
         """解析DOTA格式的标注文件"""
@@ -236,12 +236,13 @@ if __name__ == '__main__':
         image_path='path/to/image.png',
         label_path='path/to/label.txt',
         format='dota',
-        save_path='output.png'
+        save_dir='path/to/output'
     )
 
     # 批量可视化COCO格式数据集
-    visualizer.visualize_dataset(
-        dataset_dir='path/to/dataset',
+    visualizer.visualize(
+        image_path='path/to/dataset',
+        label_path='path/to/annotations.json',
         format='coco',
         save_dir='path/to/output'
     )

@@ -22,28 +22,96 @@ class HBBDatasetVisualizer:
                       for name in class_names}
     
     def visualize(self,
-                 image_path: str,
-                 label_path: str,
+                 image_path: Union[str, Path],
+                 label_path: Union[str, Path],
                  format: str,
-                 save_path: Optional[str] = None,
+                 save_dir: Optional[Union[str, Path]] = None,
                  show: bool = True,
-                 thickness: int = 2) -> np.ndarray:
+                 thickness: int = 2) -> Optional[np.ndarray]:
         """
-        可视化单张图片的标注
+        可视化数据集标注。支持单张图片或整个数据集的可视化。
         
         Args:
-            image_path: 图片路径
-            label_path: 标注文件路径
+            image_path: 图片路径或图片目录
+            label_path: 标注文件路径或标注目录
             format: 数据集格式，支持'voc'、'yolo'、'coco'
-            save_path: 保存路径，如果为None则不保存
+            save_dir: 保存目录，如果为None则不保存
             show: 是否显示图片
             thickness: 边框线宽
             
         Returns:
-            标注后的图片数组
+            如果是单张图片，返回标注后的图片数组；如果是数据集，返回None
         """
+        image_path = Path(image_path)
+        label_path = Path(label_path)
+        if save_dir:
+            save_dir = Path(save_dir)
+            save_dir.mkdir(parents=True, exist_ok=True)
+
+        # 判断是单张图片还是数据集
+        if image_path.is_file():
+            return self._visualize_single(
+                image_path, label_path, format, 
+                save_dir / image_path.name if save_dir else None,
+                show, thickness
+            )
+        
+        # 处理数据集目录
+        if not image_path.is_dir():
+            raise ValueError(f"图片路径不存在或无效: {image_path}")
+            
+        # 根据格式确定目录结构
+        if format.lower() == 'coco':
+            if not label_path.is_file():
+                raise ValueError(f"COCO格式需要提供标注文件: {label_path}")
+            label_file = label_path
+        else:
+            if not label_path.is_dir():
+                raise ValueError(f"标注目录不存在: {label_path}")
+                
+        # 遍历处理所有图片
+        image_patterns = [
+            "*.[jJ][pP][gG]",      # jpg, JPG
+            "*.[jJ][pP][eE][gG]",  # jpeg, JPEG
+            "*.[pP][nN][gG]",      # png, PNG
+            "*.[tT][iI][fF]",      # tif, TIF
+            "*.[tT][iI][fF][fF]"   # tiff, TIFF
+        ]
+        
+        for pattern in image_patterns:
+            for img_file in image_path.glob(pattern):
+                try:
+                    if format.lower() == 'coco':
+                        ann_file = label_file
+                    else:
+                        ann_file = label_path / f"{img_file.stem}{self._get_label_ext(format)}"
+                        if not ann_file.exists():
+                            print(f"警告: 未找到对应的标注文件 {ann_file}")
+                            continue
+                        
+                    self._visualize_single(
+                        img_file, 
+                        ann_file,
+                        format,
+                        save_dir / img_file.name if save_dir else None,
+                        show=False,  # 数据集模式下不显示
+                        thickness=thickness
+                    )
+                except Exception as e:
+                    print(f"处理 {img_file.name} 时出错: {str(e)}")
+                
+        return None
+    
+    def _visualize_single(self,
+                         image_path: Path,
+                         label_path: Path,
+                         format: str,
+                         save_path: Optional[Path] = None,
+                         show: bool = True,
+                         thickness: int = 2) -> np.ndarray:
+        """处理单张图片的可视化"""
         # 读取图片
-        image = cv2.imread(image_path)
+        image = cv2.imread(str(image_path))
         if image is None:
             raise ValueError(f"无法读取图片: {image_path}")
         
@@ -55,7 +123,7 @@ class HBBDatasetVisualizer:
         elif format.lower() == 'yolo':
             boxes, labels = self._parse_yolo(label_path, width, height)
         elif format.lower() == 'coco':
-            boxes, labels = self._parse_coco(label_path, Path(image_path).name)
+            boxes, labels = self._parse_coco(label_path, image_path.name)
         else:
             raise ValueError(f"不支持的数据集格式: {format}")
         
@@ -76,8 +144,8 @@ class HBBDatasetVisualizer:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         if save_path:
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            cv2.imwrite(save_path, image)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(save_path), image)
             
         if show:
             cv2.imshow('image', image)
@@ -86,52 +154,16 @@ class HBBDatasetVisualizer:
             
         return image
     
-    def visualize_dataset(self,
-                         dataset_dir: str,
-                         format: str,
-                         save_dir: Optional[str] = None) -> None:
-        """
-        批量可视化数据集
-        
-        Args:
-            dataset_dir: 数据集根目录
-            format: 数据集格式
-            save_dir: 可视化结果保存目录
-        """
+    def _get_label_ext(self, format: str) -> str:
+        """获取不同格式的标注文件扩展名"""
         if format.lower() == 'voc':
-            image_dir = os.path.join(dataset_dir, 'images')
-            label_dir = os.path.join(dataset_dir, 'annotations')
-            ext = '.xml'
+            return '.xml'
         elif format.lower() == 'yolo':
-            image_dir = os.path.join(dataset_dir, 'images')
-            label_dir = os.path.join(dataset_dir, 'labels')
-            ext = '.txt'
+            return '.txt'
         elif format.lower() == 'coco':
-            image_dir = os.path.join(dataset_dir, 'images')
-            label_path = os.path.join(dataset_dir, 'annotations.json')
+            return '.json'
         else:
             raise ValueError(f"不支持的数据集格式: {format}")
-            
-        # 遍历图片
-        for img_name in os.listdir(image_dir):
-            img_path = os.path.join(image_dir, img_name)
-            
-            if format.lower() == 'coco':
-                label_file = label_path
-            else:
-                base_name = os.path.splitext(img_name)[0]
-                label_file = os.path.join(label_dir, base_name + ext)
-            
-            if save_dir:
-                save_path = os.path.join(save_dir, img_name)
-            else:
-                save_path = None
-                
-            try:
-                self.visualize(img_path, label_file, format, 
-                             save_path=save_path, show=False)
-            except Exception as e:
-                print(f"处理 {img_name} 时出错: {str(e)}")
     
     def _parse_voc(self, xml_path: str) -> Tuple[List[List[float]], List[str]]:
         """解析VOC格式的XML文件"""
@@ -232,12 +264,5 @@ if __name__ == '__main__':
         image_path='path/to/image.jpg',
         label_path='path/to/label.xml',
         format='voc',
-        save_path='output.jpg'
-    )
-
-    # 批量可视化数据集
-    visualizer.visualize_dataset(
-        dataset_dir='path/to/dataset',
-        format='yolo',
         save_dir='path/to/output'
     )

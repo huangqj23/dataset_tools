@@ -2,8 +2,9 @@ import os
 import json
 import numpy as np
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union
 from tqdm import tqdm
+import cv2
 
 class OBBDatasetConverter:
     """旋转框数据集格式转换器，支持DOTA和COCO格式之间的转换"""
@@ -18,8 +19,8 @@ class OBBDatasetConverter:
         self.category_to_id = {cat: idx + 1 for idx, cat in enumerate(categories)}
     
     def dota_to_coco(self,
-                     dota_dir: str,
-                     output_path: str,
+                     dota_dir: Union[str, Path],
+                     output_path: Union[str, Path],
                      image_ext: str = '.png') -> None:
         """
         将DOTA格式数据集转换为COCO格式
@@ -29,6 +30,9 @@ class OBBDatasetConverter:
             output_path: COCO格式标注文件的保存路径
             image_ext: 图片文件扩展名
         """
+        dota_dir = Path(dota_dir)
+        output_path = Path(output_path)
+        
         if not self.categories:
             raise ValueError("请先使用set_categories设置类别列表")
             
@@ -42,29 +46,24 @@ class OBBDatasetConverter:
             ]
         }
         
-        image_dir = os.path.join(dota_dir, 'images')
-        label_dir = os.path.join(dota_dir, 'labelTxt')
+        image_dir = dota_dir / 'images'
+        label_dir = dota_dir / 'labelTxt'
         
         # 确保目录存在
-        if not os.path.exists(image_dir) or not os.path.exists(label_dir):
+        if not image_dir.exists() or not label_dir.exists():
             raise ValueError(f"数据集目录结构不正确: {dota_dir}")
             
         ann_id = 1
         
         # 遍历所有标注文件
-        for txt_file in tqdm(os.listdir(label_dir), desc="Converting DOTA to COCO"):
-            if not txt_file.endswith('.txt'):
-                continue
-                
+        for txt_file in tqdm(list(label_dir.glob('*.txt')), desc="Converting DOTA to COCO"):
             image_id = len(coco_data["images"]) + 1
-            base_name = txt_file[:-4]
-            image_file = base_name + image_ext
-            image_path = os.path.join(image_dir, image_file)
+            image_file = txt_file.stem + image_ext
+            image_path = image_dir / image_file
             
             # 读取图片尺寸
             try:
-                import cv2
-                img = cv2.imread(image_path)
+                img = cv2.imread(str(image_path))
                 if img is None:
                     print(f"Warning: Cannot read image {image_path}")
                     continue
@@ -83,7 +82,7 @@ class OBBDatasetConverter:
             
             # 解析标注文件
             try:
-                with open(os.path.join(label_dir, txt_file), 'r', encoding='utf-8') as f:
+                with open(txt_file, 'r', encoding='utf-8') as f:
                     # 跳过第一行（可能包含标题）
                     next(f)
                     for line in f:

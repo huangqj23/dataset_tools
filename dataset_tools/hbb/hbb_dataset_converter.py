@@ -5,6 +5,7 @@ import cv2
 from tqdm import tqdm
 from glob import glob
 from typing import List, Dict, Tuple
+from pathlib import Path
 
 class HBBDatasetConverter:
     def __init__(self):
@@ -62,22 +63,22 @@ class HBBDatasetConverter:
         
         # 读取图片和标注
         ann_id = 0
-        img_files = glob(os.path.join(yolo_dir, "*.jpg")) + glob(os.path.join(yolo_dir, "*.png"))
+        img_files = list(Path(yolo_dir).glob("*.jpg")) + list(Path(yolo_dir).glob("*.png"))
         
         for img_id, img_path in enumerate(tqdm(img_files)):
-            img = cv2.imread(img_path)
+            img = cv2.imread(str(img_path))
             height, width = img.shape[:2]
             
             dataset['images'].append({
                 'id': img_id,
-                'file_name': os.path.basename(img_path),
+                'file_name': img_path.name,
                 'width': width,
                 'height': height,
-                'path': img_path
+                'path': str(img_path)
             })
             
-            txt_path = os.path.splitext(img_path)[0] + '.txt'
-            if not os.path.exists(txt_path):
+            txt_path = img_path.with_suffix('.txt')
+            if not txt_path.exists():
                 continue
                 
             with open(txt_path, 'r') as f:
@@ -115,7 +116,7 @@ class HBBDatasetConverter:
         }
         
         ann_id = 0
-        for img_id, xml_file in enumerate(tqdm(glob(os.path.join(voc_dir, "*.xml")))):
+        for img_id, xml_file in enumerate(tqdm(list(Path(voc_dir).glob("*.xml")))):
             tree = ET.parse(xml_file)
             root = tree.getroot()
             
@@ -130,7 +131,7 @@ class HBBDatasetConverter:
                 'file_name': filename,
                 'width': width,
                 'height': height,
-                'path': os.path.join(voc_dir, filename)
+                'path': str(Path(voc_dir) / filename)
             })
             
             # 读取标注信息
@@ -177,10 +178,11 @@ class HBBDatasetConverter:
 
     def _save_yolo(self, dataset: Dict, output_dir: str):
         """保存为YOLO格式"""
-        os.makedirs(output_dir, exist_ok=True)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         # 保存类别文件
-        with open(os.path.join(output_dir, 'classes.txt'), 'w') as f:
+        with open(output_dir / 'classes.txt', 'w') as f:
             for cat in dataset['categories']:
                 f.write(f"{cat['name']}\n")
         
@@ -194,7 +196,7 @@ class HBBDatasetConverter:
             annotations = [ann for ann in dataset['annotations'] if ann['image_id'] == img_id]
             
             # 创建txt文件
-            txt_path = os.path.join(output_dir, os.path.splitext(img['file_name'])[0] + '.txt')
+            txt_path = output_dir / os.path.splitext(img['file_name'])[0] + '.txt'
             with open(txt_path, 'w') as f:
                 for ann in annotations:
                     x, y, w, h = ann['bbox']
@@ -208,12 +210,15 @@ class HBBDatasetConverter:
 
     def _save_coco(self, dataset: Dict, output_path: str):
         """保存为COCO格式"""
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w') as f:
             json.dump(dataset, f, indent=2)
 
     def _save_voc(self, dataset: Dict, output_dir: str):
         """保存为VOC格式"""
-        os.makedirs(output_dir, exist_ok=True)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         for img in dataset['images']:
             img_id = img['id']
@@ -250,7 +255,7 @@ class HBBDatasetConverter:
             
             # 保存XML文件
             tree = ET.ElementTree(root)
-            xml_path = os.path.join(output_dir, os.path.splitext(img['file_name'])[0] + '.xml')
+            xml_path = output_dir / os.path.splitext(img['file_name'])[0] + '.xml'
             tree.write(xml_path, encoding='utf-8', xml_declaration=True)
 
 if __name__ == '__main__':

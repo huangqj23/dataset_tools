@@ -172,7 +172,7 @@ class HBBDatasetVisualizer:
             cv2.rectangle(image, (x1, y1 - text_h - baseline), 
                          (x1 + text_w, y1), color, -1)
             cv2.putText(image, label, (x1, y1 - baseline), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         
         if save_path:
             save_path.parent.mkdir(parents=True, exist_ok=True)

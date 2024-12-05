@@ -54,8 +54,8 @@ class HBBDatasetEvaluator:
         # 计算VOC指标
         voc_metrics = self._evaluate_voc(gt_coco, pred_coco, iou_thresholds)
         
-        # 可视化结果
-        self._plot_metrics(coco_metrics, voc_metrics, output_dir)
+        # 打印评估结果
+        self._print_metrics(coco_metrics, voc_metrics)
         
         # 保存结果
         self._save_results(coco_metrics, voc_metrics, output_dir)
@@ -137,23 +137,6 @@ class HBBDatasetEvaluator:
             if 'id' not in ann:
                 ann['id'] = ann['image_id'] * 100000 + ann.get('category_id', 0)
         
-        # 检查是否有预测结果
-        if not pred_coco['annotations']:
-            print("警告: 没有预测结果!")
-            return {
-                'AP@0.5:0.95': 0.0,
-                'AP@0.5': 0.0,
-                'AP@0.75': 0.0,
-                'AP_small': 0.0,
-                'AP_medium': 0.0,
-                'AP_large': 0.0,
-                'AR_max1': 0.0,
-                'AR_max10': 0.0,
-                'AR_max100': 0.0,
-                'precision': [],
-                'recall': []
-            }
-        
         # 创建临时JSON文件
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as f:
@@ -186,6 +169,23 @@ class HBBDatasetEvaluator:
             'precision': coco_eval.eval['precision'].tolist(),
             'recall': coco_eval.eval['recall'].tolist()
         }
+        
+        # 计算每个类别的AP
+        category_ap = {}
+        for idx, cat in enumerate(gt_coco['categories']):
+            # AP@[0.5:0.95]
+            ap = coco_eval.eval['precision'][:, :, idx, 0, -1].mean()
+            # AP@0.5
+            ap50 = coco_eval.eval['precision'][0, :, idx, 0, -1].mean()
+            # AP@0.75
+            ap75 = coco_eval.eval['precision'][5, :, idx, 0, -1].mean()
+            
+            category_ap[cat['name']] = {
+                'AP@[0.5:0.95]': float(ap),
+                'AP@0.5': float(ap50),
+                'AP@0.75': float(ap75)
+            }
+        metrics['category_ap'] = category_ap
         
         return metrics
     
@@ -228,59 +228,59 @@ class HBBDatasetEvaluator:
         
         return metrics
     
-    def _plot_metrics(self, 
-                     coco_metrics: Dict,
-                     voc_metrics: Dict,
-                     output_dir: Path):
-        """可视化评估结果"""
-        # 绘制COCO PR曲线
-        plt.figure(figsize=(10, 5))
-        plt.subplot(121)
-        for i, iou_thresh in enumerate(np.arange(0.5, 1.0, 0.05)):
-            precision = np.array(coco_metrics['precision'])[i, :, 0, 0, 0]
-            recall = np.array(coco_metrics['recall'])[0, :, 0, 0]
-            plt.plot(recall, precision, label=f'IoU={iou_thresh:.2f}')
-        plt.xlabel('Recall')
-        plt.ylabel('Precision')
-        plt.title('COCO PR Curves')
-        plt.legend()
+    def _print_metrics(self, coco_metrics: Dict, voc_metrics: Dict):
+        """打印评估指标"""
+        print("\n" + "="*80)
+        print("COCO Metrics:")
+        print("-"*80)
+        metrics_to_print = [
+            ('AP@0.5:0.95', 'AP@[0.5:0.95]'),
+            ('AP@0.5', 'AP@0.5'),
+            ('AP@0.75', 'AP@0.75'),
+            ('AP_small', 'AP (small)'),
+            ('AP_medium', 'AP (medium)'),
+            ('AP_large', 'AP (large)'),
+            ('AR_max1', 'AR@1'),
+            ('AR_max10', 'AR@10'),
+            ('AR_max100', 'AR@100')
+        ]
         
-        # 绘制VOC PR曲线
-        plt.subplot(122)
-        for cat_name, pr_curves in voc_metrics['precision_recall_curves'].items():
-            precision, recall = pr_curves[0]  # IoU=0.5
-            plt.plot(recall, precision, label=cat_name)
-        plt.xlabel('Recall')
-        plt.ylabel('Precision')
-        plt.title('VOC PR Curves (IoU=0.5)')
-        plt.legend()
+        # 打印总体指标
+        for key, name in metrics_to_print:
+            value = coco_metrics[key]
+            print(f"{name:<15}: {value:.4f}")
         
-        plt.tight_layout()
-        plt.savefig(output_dir / 'pr_curves.png')
-        plt.close()
+        # 打印每个类别的AP
+        print("\nCOCO Per-class AP:")
+        print("-"*80)
+        print(f"{'Category':<15} {'AP@[0.5:0.95]':<15} {'AP@0.5':<15} {'AP@0.75':<15}")
+        print("-"*80)
         
-        # 绘制AP柱状图
-        plt.figure(figsize=(15, 5))
+        if 'category_ap' in coco_metrics:
+            # 按AP@[0.5:0.95]值降序排序
+            sorted_ap = sorted(
+                coco_metrics['category_ap'].items(), 
+                key=lambda x: x[1]['AP@[0.5:0.95]'], 
+                reverse=True
+            )
+            for class_name, ap_dict in sorted_ap:
+                print(f"{class_name:<15} "
+                      f"{ap_dict['AP@[0.5:0.95]']:>14.4f} "
+                      f"{ap_dict['AP@0.5']:>14.4f} "
+                      f"{ap_dict['AP@0.75']:>14.4f}")
         
-        # COCO metrics
-        plt.subplot(121)
-        metrics_names = ['AP@0.5:0.95', 'AP@0.5', 'AP@0.75', 
-                        'AP_small', 'AP_medium', 'AP_large']
-        values = [coco_metrics[k] for k in metrics_names]
-        plt.bar(metrics_names, values)
-        plt.xticks(rotation=45)
-        plt.title('COCO Metrics')
+        print("\n" + "="*50)
+        print("VOC Metrics:")
+        print("-"*50)
+        print(f"mAP@0.5: {voc_metrics['mAP']:.4f}")
         
-        # VOC AP per class
-        plt.subplot(122)
-        plt.bar(voc_metrics['AP_per_class'].keys(), 
-                voc_metrics['AP_per_class'].values())
-        plt.xticks(rotation=45)
-        plt.title('VOC AP per Class')
-        
-        plt.tight_layout()
-        plt.savefig(output_dir / 'ap_comparison.png')
-        plt.close()
+        print("\nVOC Per-class AP@0.5:")
+        print("-"*50)
+        # 按AP值降序排序
+        sorted_ap = sorted(voc_metrics['AP_per_class'].items(), 
+                          key=lambda x: x[1], reverse=True)
+        for class_name, ap in sorted_ap:
+            print(f"{class_name:<15}: {ap:.4f}")
     
     def _save_results(self,
                      coco_metrics: Dict,
@@ -289,17 +289,91 @@ class HBBDatasetEvaluator:
         """保存评估结果"""
         results = {
             'coco_metrics': {
-                k: v for k, v in coco_metrics.items() 
-                if k not in ['precision', 'recall']
+                'overall': {
+                    'AP@[0.5:0.95]': coco_metrics['AP@0.5:0.95'],
+                    'AP@0.5': coco_metrics['AP@0.5'],
+                    'AP@0.75': coco_metrics['AP@0.75'],
+                    'AP (small)': coco_metrics['AP_small'],
+                    'AP (medium)': coco_metrics['AP_medium'],
+                    'AP (large)': coco_metrics['AP_large'],
+                    'AR@1': coco_metrics['AR_max1'],
+                    'AR@10': coco_metrics['AR_max10'],
+                    'AR@100': coco_metrics['AR_max100']
+                },
+                'per_class': {}
             },
             'voc_metrics': {
-                'mAP': voc_metrics['mAP'],
-                'AP_per_class': voc_metrics['AP_per_class']
+                'overall': {
+                    'mAP@0.5': voc_metrics['mAP']
+                },
+                'per_class': {}
             }
         }
         
-        with open(output_dir / 'evaluation_results.json', 'w') as f:
-            json.dump(results, f, indent=2)
+        # 添加COCO每个类别的AP
+        if 'category_ap' in coco_metrics:
+            # 按AP@[0.5:0.95]降序排序
+            sorted_ap = sorted(
+                coco_metrics['category_ap'].items(),
+                key=lambda x: x[1]['AP@[0.5:0.95]'],
+                reverse=True
+            )
+            for class_name, ap_dict in sorted_ap:
+                results['coco_metrics']['per_class'][class_name] = {
+                    'AP@[0.5:0.95]': ap_dict['AP@[0.5:0.95]'],
+                    'AP@0.5': ap_dict['AP@0.5'],
+                    'AP@0.75': ap_dict['AP@0.75']
+                }
+        
+        # 添加VOC每个类别的AP
+        sorted_ap = sorted(
+            voc_metrics['AP_per_class'].items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        for class_name, ap in sorted_ap:
+            results['voc_metrics']['per_class'][class_name] = {
+                'AP@0.5': ap
+            }
+        
+        # 保存为JSON文件
+        with open(output_dir / 'evaluation_results.json', 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        
+        # 保存为易读的文本文件
+        with open(output_dir / 'evaluation_results.txt', 'w', encoding='utf-8') as f:
+            # COCO结果
+            f.write("="*80 + "\n")
+            f.write("COCO Metrics:\n")
+            f.write("-"*80 + "\n")
+            
+            # COCO总体指标
+            for name, value in results['coco_metrics']['overall'].items():
+                f.write(f"{name:<15}: {value:.4f}\n")
+            
+            # COCO每类AP
+            f.write("\nCOCO Per-class AP:\n")
+            f.write("-"*80 + "\n")
+            f.write(f"{'Category':<15} {'AP@[0.5:0.95]':<15} {'AP@0.5':<15} {'AP@0.75':<15}\n")
+            f.write("-"*80 + "\n")
+            
+            for class_name, ap_dict in results['coco_metrics']['per_class'].items():
+                f.write(f"{class_name:<15} "
+                       f"{ap_dict['AP@[0.5:0.95]']:>14.4f} "
+                       f"{ap_dict['AP@0.5']:>14.4f} "
+                       f"{ap_dict['AP@0.75']:>14.4f}\n")
+            
+            # VOC结果
+            f.write("\n" + "="*50 + "\n")
+            f.write("VOC Metrics:\n")
+            f.write("-"*50 + "\n")
+            f.write(f"mAP@0.5: {results['voc_metrics']['overall']['mAP@0.5']:.4f}\n")
+            
+            # VOC每类AP
+            f.write("\nVOC Per-class AP@0.5:\n")
+            f.write("-"*50 + "\n")
+            for class_name, ap_dict in results['voc_metrics']['per_class'].items():
+                f.write(f"{class_name:<15}: {ap_dict['AP@0.5']:.4f}\n")
     
     def _get_voc_categories(self, voc_dir: Path) -> List[Dict]:
         """从VOC数据集中获取所有类别"""
@@ -321,7 +395,7 @@ class HBBDatasetEvaluator:
         tree = ET.parse(xml_path)
         root = tree.getroot()
         
-        # 图片信息
+        # 片信息
         filename = root.find('filename').text
         size = root.find('size')
         width = int(size.find('width').text)
@@ -418,7 +492,7 @@ class HBBDatasetEvaluator:
                             })
                             ann_id += 1
                         except Exception as e:
-                            print(f"警告: 解析行 '{line.strip()}' 时出错: {str(e)}")
+                            print(f"警告: 解行 '{line.strip()}' 时出错: {str(e)}")
                             continue
         except Exception as e:
             print(f"警告: 读取文件 {txt_path} 时出错: {str(e)}")
@@ -452,7 +526,7 @@ class HBBDatasetEvaluator:
             max_iou = 0
             max_idx = -1
             
-            # 计算与所有真值框的IoU
+            # 算与所有真值框的IoU
             for gt_idx, gt_box in enumerate(gt_boxes):
                 if not gt_matched[gt_idx]:
                     iou = self._calculate_iou(pred_box['bbox'], gt_box['bbox'])
@@ -484,7 +558,7 @@ class HBBDatasetEvaluator:
         return precision, recall, ap
     
     def _calculate_iou(self, bbox1: List[float], bbox2: List[float]) -> float:
-        """计算两个边界框的IoU"""
+        """计算两边界框的IoU"""
         # COCO格式: [x,y,w,h]
         x1, y1, w1, h1 = bbox1
         x2, y2, w2, h2 = bbox2

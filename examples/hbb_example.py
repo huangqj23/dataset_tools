@@ -1,6 +1,7 @@
 from dataset_tools.hbb.hbb_dataset_visualizer import HBBDatasetVisualizer
 from dataset_tools.hbb.hbb_dataset_cropper import HBBDatasetCropper
 from dataset_tools.hbb.hbb_dataset_analyzer import HBBDatasetAnalyzer
+from dataset_tools.hbb.hbb_dataset_evaluator import HBBDatasetEvaluator
 
 if __name__ == '__main__':
     
@@ -59,12 +60,25 @@ if __name__ == '__main__':
     # )
     
     # statistics
-    analyzer = HBBDatasetAnalyzer()
+    # analyzer = HBBDatasetAnalyzer()
     
-    analyzer.analyze(
-        image_path='/data1/DATA_126/hqj/MAR20/JPEGImages/',
-        label_path='/data1/DATA_126/hqj/MAR20/Annotations/hbb/',
-        format='voc',
-        output_dir='/data1/DATA_126/hqj/MAR20/analysis/',
+    # analyzer.analyze(
+    #     image_path='/data1/DATA_126/hqj/MAR20/JPEGImages/',
+    #     label_path='/data1/DATA_126/hqj/MAR20/Annotations/hbb/',
+    #     format='voc',
+    #     output_dir='/data1/DATA_126/hqj/MAR20/analysis/',
+    # ) 
+    
+    # evaluate
+    evaluator = HBBDatasetEvaluator()
+    
+    # 评估YOLO格式预测结果
+    evaluator.evaluate(
+        gt_path='data/ground_truth',
+        pred_path='data/prediction',
+        gt_format='yolo',
+        pred_format='yolo',
+        output_dir='output/evaluation',
+        classes_file='data/classes.txt'
     ) 
     

@@ -1,5 +1,6 @@
 from dataset_tools.hbb.hbb_dataset_visualizer import HBBDatasetVisualizer
 from dataset_tools.hbb.hbb_dataset_cropper import HBBDatasetCropper
+from dataset_tools.hbb.hbb_dataset_analyzer import HBBDatasetAnalyzer
 
 if __name__ == '__main__':
     
@@ -45,16 +46,25 @@ if __name__ == '__main__':
     # )
 
     # crop
-    # 使用示例
-    cropper = HBBDatasetCropper()
+    # # 使用示例
+    # cropper = HBBDatasetCropper()
     
-    # VOC格式
-    cropper.crop(
+    # # VOC格式
+    # cropper.crop(
+        # image_path='/data1/DATA_126/hqj/MAR20/JPEGImages/',
+        # label_path='/data1/DATA_126/hqj/MAR20/Annotations/hbb/',
+    #     output_dir='/data1/DATA_126/hqj/MAR20/crops/',
+    #     format='voc',
+    #     num_workers=10
+    # )
+    
+    # statistics
+    analyzer = HBBDatasetAnalyzer()
+    
+    analyzer.analyze(
         image_path='/data1/DATA_126/hqj/MAR20/JPEGImages/',
         label_path='/data1/DATA_126/hqj/MAR20/Annotations/hbb/',
-        output_dir='/data1/DATA_126/hqj/MAR20/crops/',
         format='voc',
-        num_workers=10
-    )
-    
+        output_dir='/data1/DATA_126/hqj/MAR20/analysis/',
+    ) 
     

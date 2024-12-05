@@ -27,7 +27,7 @@ class OBBDatasetVisualizer:
                  image_path: Union[str, Path],
                  label_path: Union[str, Path],
                  format: str,
-                 save_dir: Optional[Union[str, Path]] = None,
+                 output_dir: Optional[Union[str, Path]] = None,
                  show: bool = True,
                  thickness: int = 2,
                  num_workers: int = 4) -> Optional[np.ndarray]:
@@ -38,7 +38,7 @@ class OBBDatasetVisualizer:
             image_path: 图片路径或图片目录
             label_path: 标注文件路径或标注目录
             format: 数据集格式，支持'voc'、'yolo'、'coco'
-            save_dir: 保存目录，如果为None则不保存
+            output_dir: 输出目录，如果为None则不保存
             show: 是否显示图片
             thickness: 边框线宽
             num_workers: 并行处理的线程数
@@ -48,15 +48,15 @@ class OBBDatasetVisualizer:
         """
         image_path = Path(image_path)
         label_path = Path(label_path)
-        if save_dir:
-            save_dir = Path(save_dir)
-            save_dir.mkdir(parents=True, exist_ok=True)
+        if output_dir:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
 
         # 判断是单张图片还是数据集
         if image_path.is_file():
             return self._visualize_single(
                 image_path, label_path, format, 
-                save_dir / image_path.name if save_dir else None,
+                output_dir / image_path.name if output_dir else None,
                 show, thickness
             )
         
@@ -100,7 +100,7 @@ class OBBDatasetVisualizer:
                     img_file, 
                     ann_file,
                     format,
-                    save_dir / img_file.name if save_dir else None,
+                    output_dir / img_file.name if output_dir else None,
                     show=False,  # 数据集模式下不显示
                     thickness=thickness
                 )
@@ -282,7 +282,7 @@ if __name__ == '__main__':
         image_path='path/to/image.png',
         label_path='path/to/label.txt',
         format='dota',
-        save_dir='path/to/output'
+        output_dir='path/to/output'
     )
 
     # 批量可视化COCO格式数据集
@@ -290,5 +290,5 @@ if __name__ == '__main__':
         image_path='path/to/dataset',
         label_path='path/to/annotations.json',
         format='coco',
-        save_dir='path/to/output'
+        output_dir='path/to/output'
     )

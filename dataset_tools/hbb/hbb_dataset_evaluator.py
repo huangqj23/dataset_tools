@@ -363,12 +363,14 @@ class HBBDatasetEvaluator:
                              cat_name_to_id: Dict) -> Tuple[Dict, List[Dict]]:
         """将YOLO格式转换为COCO格式"""
         # 获取对应的图片
-        img_path = txt_path.with_suffix('.jpg')
+        img_name = txt_path.stem + '.jpg'
+        img_path = txt_path.parent.parent / 'images' / img_name
         if not img_path.exists():
-            img_path = txt_path.with_suffix('.png')
+            img_name = txt_path.stem + '.png'
+            img_path = txt_path.parent.parent / 'images' / img_name
         
         if not img_path.exists():
-            raise ValueError(f"找不到对应的图片文件: {txt_path}")
+            raise ValueError(f"找不到对应的图片文件: {img_path}")
         
         # 读取图片尺寸
         import cv2
@@ -379,7 +381,7 @@ class HBBDatasetEvaluator:
         
         image_info = {
             'id': img_id,
-            'file_name': img_path.name,
+            'file_name': img_name,  # 只保存文件名
             'width': width,
             'height': height
         }
@@ -522,7 +524,7 @@ class HBBDatasetEvaluator:
         return ap
 
 if __name__ == '__main__':
-    # 使用示例
+    
     evaluator = HBBDatasetEvaluator()
     
     # 评估YOLO格式预测结果

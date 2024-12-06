@@ -80,6 +80,10 @@ class VideoImageConverter:
             with tqdm(total=total_frames,
                      desc=f"生成视频片段 [{start_idx}-{start_idx + len(images)}/{total_images}]") as pbar:
                 for i, current_frame in enumerate(images):
+                    # 确保当前帧的尺寸正确
+                    if current_frame.shape[:2][::-1] != frame_size:
+                        current_frame = cv2.resize(current_frame, frame_size)
+                    
                     # 写入当前图片的帧
                     for _ in range(frames_per_image):
                         out.write(current_frame)
@@ -88,15 +92,25 @@ class VideoImageConverter:
                     # 处理过渡帧
                     if i < len(images) - 1 and transition_frames > 0:
                         next_frame = images[i + 1]
+                        # 确保下一帧的尺寸正确
+                        if next_frame.shape[:2][::-1] != frame_size:
+                            next_frame = cv2.resize(next_frame, frame_size)
+                        
                         for t in range(transition_frames):
                             alpha = t / transition_frames
-                            blended = cv2.addWeighted(
-                                current_frame, 1 - alpha,
-                                next_frame, alpha,
-                                0
-                            )
-                            out.write(blended)
-                            pbar.update(1)
+                            try:
+                                blended = cv2.addWeighted(
+                                    current_frame, 1 - alpha,
+                                    next_frame, alpha,
+                                    0
+                                )
+                                out.write(blended)
+                                pbar.update(1)
+                            except cv2.error as e:
+                                print(f"过渡帧处理错误: {str(e)}")
+                                print(f"当前帧尺寸: {current_frame.shape}")
+                                print(f"下一帧尺寸: {next_frame.shape}")
+                                raise
             return True
         finally:
             out.release()
@@ -356,7 +370,7 @@ class VideoImageConverter:
         将视频拆分为图片序列
         
         Args:
-            video_path: 视频��件路径
+            video_path: 视频件路径
             output_dir: 输出图片目录
             frame_interval: 帧间隔
             image_format: 输出图片格式
@@ -490,7 +504,7 @@ class VideoImageConverter:
         批量处理视频目录
         
         Args:
-            video_dir: 视���目录
+            video_dir: 视目录
             output_dir: 输出目录
             frame_interval: 帧间隔
             image_format: 输出图片格式

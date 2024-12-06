@@ -64,7 +64,6 @@ class VideoImageConverter:
                        image_format: str = '.jpg',
                        sort_files: bool = True,
                        resize: Optional[Tuple[int, int]] = None,
-                       num_workers: Optional[int] = None,
                        frames_per_image: int = 1,
                        transition_frames: int = 0) -> bool:
         """
@@ -77,7 +76,6 @@ class VideoImageConverter:
             image_format: 图片格式（例如：'.jpg'）
             sort_files: 是否对文件名进行排序
             resize: 调整大小，格式为(width, height)
-            num_workers: 线程数
             frames_per_image: 每张图片持续的帧数
             transition_frames: 图片之间的过渡帧数（淡入淡出效果）
             
@@ -94,28 +92,30 @@ class VideoImageConverter:
         # 确保输出目录存在
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # 获取所有图片文件并排序
+        # 获取所有图片文件
         image_files = []
         if image_format == '*':
             for fmt in self.supported_image_formats:
-                image_files.extend(list(image_dir.glob(f"*{fmt}")))
+                image_files.extend(image_dir.glob(f"*{fmt}"))
         else:
-            image_files.extend(list(image_dir.glob(f"*{image_format.lower()}")))
-            if image_format.lower() != image_format.upper():
-                image_files.extend(list(image_dir.glob(f"*{image_format.upper()}")))
+            # 同时查找小写和大写扩展名
+            pattern = f"*{image_format}"
+            image_files.extend(image_dir.glob(pattern))
+            image_files.extend(image_dir.glob(pattern.upper()))
         
+        # 确保找到图片文件
         if not image_files:
             raise ValueError(f"未找到{image_format}格式的图片文件")
         
         # 数字排序
         if sort_files:
-            def get_number(filename):
-                # 从文件名中提取数字部分
+            def extract_number(filename):
+                # 从文件名中提取数字
                 import re
-                numbers = re.findall(r'\d+', filename.stem)
-                return int(numbers[0]) if numbers else filename.stem
+                numbers = re.findall(r'\d+', str(filename))
+                return int(numbers[0]) if numbers else str(filename)
             
-            image_files.sort(key=get_number)
+            image_files = sorted(image_files, key=extract_number)
         
         print(f"找到 {len(image_files)} 个图片文件")
         
@@ -123,9 +123,10 @@ class VideoImageConverter:
         first_image = cv2.imread(str(image_files[0]))
         if first_image is None:
             raise ValueError(f"无法读取图片: {image_files[0]}")
-            
+        
         if resize:
             frame_size = resize
+            first_image = cv2.resize(first_image, resize)
         else:
             frame_size = (first_image.shape[1], first_image.shape[0])
         
@@ -141,51 +142,62 @@ class VideoImageConverter:
             str(output_path), fourcc, fps, frame_size
         )
         
+        if not out.isOpened():
+            raise ValueError("无法创建视频写入器")
+        
         try:
+            # 计算总帧数
             total_frames = len(image_files) * frames_per_image + (len(image_files) - 1) * transition_frames
-            with tqdm(total=total_frames, desc="Processing frames") as pbar:
-                # 逐个处理图片
-                for i, img_file in enumerate(image_files):
-                    # 读取当前图片
-                    current_frame = cv2.imread(str(img_file))
-                    if current_frame is None:
-                        print(f"警告: 无法读取图片 {img_file}")
-                        continue
-                    
-                    if resize:
-                        current_frame = cv2.resize(current_frame, resize)
-                    
-                    # 写入当前图片的帧
+            
+            # 预先读取所有图片
+            print("正在读取图片...")
+            images = []
+            for img_file in tqdm(image_files):
+                img = cv2.imread(str(img_file))
+                if img is None:
+                    print(f"警告: 无法读取图片 {img_file}")
+                    continue
+                if resize:
+                    img = cv2.resize(img, resize)
+                images.append(img)
+            
+            if not images:
+                raise ValueError("没有成功读取任何图片")
+            
+            print(f"成功读取 {len(images)} 张图片")
+            
+            # 写入视频帧
+            with tqdm(total=total_frames, desc="生成视频") as pbar:
+                for i, current_frame in enumerate(images):
+                    # 写入当前图片的指定帧数
                     for _ in range(frames_per_image):
                         out.write(current_frame)
                         pbar.update(1)
                     
-                    # 如果不是最后一张图片且有过渡帧，则创建过渡效果
-                    if i < len(image_files) - 1 and transition_frames > 0:
-                        # 读取下一张图片
-                        next_frame = cv2.imread(str(image_files[i + 1]))
-                        if next_frame is not None:
-                            if resize:
-                                next_frame = cv2.resize(next_frame, resize)
-                            
-                            # 创建淡入淡出效果
-                            for t in range(transition_frames):
-                                alpha = t / transition_frames
-                                blended_frame = cv2.addWeighted(
-                                    current_frame, 1 - alpha,
-                                    next_frame, alpha,
-                                    0
-                                )
-                                out.write(blended_frame)
-                                pbar.update(1)
+                    # 处理过渡效果
+                    if i < len(images) - 1 and transition_frames > 0:
+                        next_frame = images[i + 1]
+                        # 创建过渡帧
+                        for t in range(transition_frames):
+                            alpha = t / transition_frames
+                            blended = cv2.addWeighted(
+                                current_frame, 1 - alpha,
+                                next_frame, alpha,
+                                0
+                            )
+                            out.write(blended)
+                            pbar.update(1)
             
-            print(f"\n视频生成完成，总帧数: {total_frames}")
+            print(f"\n视频生成完成")
+            print(f"总图片数量: {len(images)}")
+            print(f"每张图片帧数: {frames_per_image}")
+            print(f"过渡帧数: {transition_frames}")
+            print(f"总帧数: {total_frames}")
             print(f"视频时长: {total_frames/fps:.2f} 秒")
-            print(f"处理的图片数量: {len(image_files)}")
             return True
             
         except Exception as e:
-            print(f"写入视频时出错: {str(e)}")
+            print(f"生成视频时出错: {str(e)}")
             return False
             
         finally:
@@ -218,7 +230,7 @@ class VideoImageConverter:
                        num_workers: Optional[int] = None,
                        buffer_size: int = 30) -> bool:
         """
-        将视频拆分为图片序列
+        将视频拆分为图片序��
         
         Args:
             video_path: 视频文件路径

@@ -57,6 +57,89 @@ class VideoImageConverter:
             print(f"处理图片 {img_file} 时出错: {str(e)}")
             return None
     
+    def _write_partial_video(self,
+                            images: List[np.ndarray],
+                            output_path: Path,
+                            fps: int,
+                            frame_size: Tuple[int, int],
+                            frames_per_image: int,
+                            transition_frames: int,
+                            start_idx: int,
+                            total_images: int) -> bool:
+        """写入部分视频"""
+        fourcc = cv2.VideoWriter_fourcc(*self.codec_map[output_path.suffix.lower()])
+        out = cv2.VideoWriter(str(output_path), fourcc, fps, frame_size)
+        
+        if not out.isOpened():
+            return False
+        
+        try:
+            total_frames = (len(images) * frames_per_image + 
+                           (len(images) - 1) * transition_frames)
+            
+            with tqdm(total=total_frames,
+                     desc=f"生成视频片段 [{start_idx}-{start_idx + len(images)}/{total_images}]") as pbar:
+                for i, current_frame in enumerate(images):
+                    # 写入当前图片的帧
+                    for _ in range(frames_per_image):
+                        out.write(current_frame)
+                        pbar.update(1)
+                    
+                    # 处理过渡帧
+                    if i < len(images) - 1 and transition_frames > 0:
+                        next_frame = images[i + 1]
+                        for t in range(transition_frames):
+                            alpha = t / transition_frames
+                            blended = cv2.addWeighted(
+                                current_frame, 1 - alpha,
+                                next_frame, alpha,
+                                0
+                            )
+                            out.write(blended)
+                            pbar.update(1)
+            return True
+        finally:
+            out.release()
+    
+    def _merge_videos(self, video_parts: List[Path], output_path: Path) -> bool:
+        """合并多个视频文件"""
+        try:
+            # 读取第一个视频获取信息
+            cap = cv2.VideoCapture(str(video_parts[0]))
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            frame_size = (
+                int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            )
+            cap.release()
+            
+            # 创建最终视频写入器
+            fourcc = cv2.VideoWriter_fourcc(*self.codec_map[output_path.suffix.lower()])
+            out = cv2.VideoWriter(str(output_path), fourcc, fps, frame_size)
+            
+            if not out.isOpened():
+                raise ValueError("无法创建最终视频文件")
+            
+            # 按顺序合并视频
+            print("\n合并视频片段...")
+            for video_part in tqdm(video_parts, desc="Merging videos"):
+                cap = cv2.VideoCapture(str(video_part))
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    out.write(frame)
+                cap.release()
+            
+            return True
+        
+        except Exception as e:
+            print(f"合并视频时出错: {str(e)}")
+            return False
+        
+        finally:
+            out.release()
+    
     def images_to_video(self,
                        image_dir: Union[str, Path],
                        output_path: Union[str, Path],
@@ -173,7 +256,7 @@ class VideoImageConverter:
                 except Exception as e:
                     print(f"处理图片 {img_file} 时出错: {str(e)}")
         
-        # 按原始顺序重建图片列表
+        # 按原始序重建图片列表
         images = [image_map[f] for f in image_files if f in image_map]
         
         if not images:
@@ -215,27 +298,18 @@ class VideoImageConverter:
                     
                     # 当缓冲区满时，批量写入
                     if len(frame_buffer) >= buffer_size:
-                        with ThreadPoolExecutor(max_workers=num_workers) as write_executor:
-                            # 并行写入帧
-                            futures = [
-                                write_executor.submit(out.write, f.copy())
-                                for f in frame_buffer
-                            ]
-                            # 等待所有写入完成
-                            for _ in as_completed(futures):
-                                pbar.update(1)
-                    
-                    frame_buffer.clear()
+                        # 直接写入帧，不使用多线程（因为 VideoWriter 不是线程安全的）
+                        for f in frame_buffer:
+                            out.write(f)
+                            pbar.update(1)
+                        # 清空缓冲区
+                        frame_buffer.clear()
                 
                 # 处理剩余的帧
                 if frame_buffer:
-                    with ThreadPoolExecutor(max_workers=num_workers) as write_executor:
-                        futures = [
-                            write_executor.submit(out.write, f.copy())
-                            for f in frame_buffer
-                        ]
-                        for _ in as_completed(futures):
-                            pbar.update(1)
+                    for f in frame_buffer:
+                        out.write(f)
+                        pbar.update(1)
             
             print(f"\n视频生成完成")
             print(f"总图片数量: {len(images)}")
@@ -282,7 +356,7 @@ class VideoImageConverter:
         将视频拆分为图片序列
         
         Args:
-            video_path: 视频文件路径
+            video_path: 视频��件路径
             output_dir: 输出图片目录
             frame_interval: 帧间隔
             image_format: 输出图片格式
@@ -416,7 +490,7 @@ class VideoImageConverter:
         批量处理视频目录
         
         Args:
-            video_dir: 视频目录
+            video_dir: 视���目录
             output_dir: 输出目录
             frame_interval: 帧间隔
             image_format: 输出图片格式

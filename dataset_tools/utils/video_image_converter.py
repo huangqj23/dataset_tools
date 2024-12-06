@@ -65,7 +65,8 @@ class VideoImageConverter:
                        sort_files: bool = True,
                        resize: Optional[Tuple[int, int]] = None,
                        frames_per_image: int = 1,
-                       transition_frames: int = 0) -> bool:
+                       transition_frames: int = 0,
+                       num_workers: Optional[int] = None) -> bool:
         """
         将图片序列转换为视频，支持控制每张图片的持续时间
         
@@ -78,6 +79,7 @@ class VideoImageConverter:
             resize: 调整大小，格式为(width, height)
             frames_per_image: 每张图片持续的帧数
             transition_frames: 图片之间的过渡帧数（淡入淡出效果）
+            num_workers: 线程数
             
         Returns:
             bool: 转换是否成功
@@ -145,47 +147,94 @@ class VideoImageConverter:
         if not out.isOpened():
             raise ValueError("无法创建视频写入器")
         
+        num_workers = num_workers or min(32, os.cpu_count() * 2)
+        
+        # 使用线程池并行读取图片
+        print("正在读取图片...")
+        images = []
+        image_map = {}  # 用于保持顺序
+        
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # 创建图片读取任务
+            future_to_file = {
+                executor.submit(self._read_image, img_file, resize): img_file 
+                for img_file in image_files
+            }
+            
+            # 使用tqdm显示进度
+            for future in tqdm(as_completed(future_to_file), 
+                             total=len(image_files),
+                             desc="Loading images"):
+                img_file = future_to_file[future]
+                try:
+                    img = future.result()
+                    if img is not None:
+                        image_map[img_file] = img
+                except Exception as e:
+                    print(f"处理图片 {img_file} 时出错: {str(e)}")
+        
+        # 按原始顺序重建图片列表
+        images = [image_map[f] for f in image_files if f in image_map]
+        
+        if not images:
+            raise ValueError("没有成功读取任何图片")
+        
+        print(f"成功读取 {len(images)} 张图片")
+        
+        # 计算总帧数
+        total_frames = len(images) * frames_per_image + (len(images) - 1) * transition_frames
+        
+        # 创建帧生成器
+        def frame_generator():
+            for i, current_frame in enumerate(images):
+                # 生成当前图片的所有帧
+                for _ in range(frames_per_image):
+                    yield current_frame
+                
+                # 生成过渡帧
+                if i < len(images) - 1 and transition_frames > 0:
+                    next_frame = images[i + 1]
+                    for t in range(transition_frames):
+                        alpha = t / transition_frames
+                        blended = cv2.addWeighted(
+                            current_frame, 1 - alpha,
+                            next_frame, alpha,
+                            0
+                        )
+                        yield blended
+        
+        # 使用线程池加速视频写入
         try:
-            # 计算总帧数
-            total_frames = len(image_files) * frames_per_image + (len(image_files) - 1) * transition_frames
+            # 创建帧缓冲区
+            frame_buffer = []
+            buffer_size = 30  # 调整缓冲区大小
             
-            # 预先读取所有图片
-            print("正在读取图片...")
-            images = []
-            for img_file in tqdm(image_files):
-                img = cv2.imread(str(img_file))
-                if img is None:
-                    print(f"警告: 无法读取图片 {img_file}")
-                    continue
-                if resize:
-                    img = cv2.resize(img, resize)
-                images.append(img)
-            
-            if not images:
-                raise ValueError("没有成功读取任何图片")
-            
-            print(f"成功读取 {len(images)} 张图片")
-            
-            # 写入视频帧
             with tqdm(total=total_frames, desc="生成视频") as pbar:
-                for i, current_frame in enumerate(images):
-                    # 写入当前图片的指定帧数
-                    for _ in range(frames_per_image):
-                        out.write(current_frame)
-                        pbar.update(1)
+                for frame in frame_generator():
+                    frame_buffer.append(frame)
                     
-                    # 处理过渡效果
-                    if i < len(images) - 1 and transition_frames > 0:
-                        next_frame = images[i + 1]
-                        # 创建过渡帧
-                        for t in range(transition_frames):
-                            alpha = t / transition_frames
-                            blended = cv2.addWeighted(
-                                current_frame, 1 - alpha,
-                                next_frame, alpha,
-                                0
-                            )
-                            out.write(blended)
+                    # 当缓冲区满时，批量写入
+                    if len(frame_buffer) >= buffer_size:
+                        with ThreadPoolExecutor(max_workers=num_workers) as write_executor:
+                            # 并行写入帧
+                            futures = [
+                                write_executor.submit(out.write, f.copy())
+                                for f in frame_buffer
+                            ]
+                            # 等待所有写入完成
+                            for _ in as_completed(futures):
+                                pbar.update(1)
+                    
+                    frame_buffer.clear()
+                
+                # 处理剩余的帧
+                if frame_buffer:
+                    with ThreadPoolExecutor(max_workers=num_workers) as write_executor:
+                        futures = [
+                            write_executor.submit(out.write, f.copy())
+                            for f in frame_buffer
+                        ]
+                        for _ in as_completed(futures):
                             pbar.update(1)
             
             print(f"\n视频生成完成")
@@ -230,7 +279,7 @@ class VideoImageConverter:
                        num_workers: Optional[int] = None,
                        buffer_size: int = 30) -> bool:
         """
-        将视频拆分为图片序��
+        将视频拆分为图片序列
         
         Args:
             video_path: 视频文件路径

@@ -10,6 +10,7 @@ if __name__ == '__main__':
         output_path='output.mp4',
         fps=30,
         image_format='.JPG',
-        frames_per_image=30
+        frames_per_image=30,
+        num_workers=8
     )
     

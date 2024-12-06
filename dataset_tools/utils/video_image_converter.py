@@ -94,14 +94,12 @@ class VideoImageConverter:
         # 确保输出目录存在
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # 获取所有图片文件
+        # 获取所有图片文件并排序
         image_files = []
-        # 支持多种格式和大小写
         if image_format == '*':
             for fmt in self.supported_image_formats:
                 image_files.extend(list(image_dir.glob(f"*{fmt}")))
         else:
-            # 同时查找小写和大写扩展名
             image_files.extend(list(image_dir.glob(f"*{image_format.lower()}")))
             if image_format.lower() != image_format.upper():
                 image_files.extend(list(image_dir.glob(f"*{image_format.upper()}")))
@@ -109,9 +107,15 @@ class VideoImageConverter:
         if not image_files:
             raise ValueError(f"未找到{image_format}格式的图片文件")
         
-        # 确保文件名排序正确
+        # 数字排序
         if sort_files:
-            image_files.sort(key=lambda x: x.stem)  # 按文件名数字排序
+            def get_number(filename):
+                # 从文件名中提取数字部分
+                import re
+                numbers = re.findall(r'\d+', filename.stem)
+                return int(numbers[0]) if numbers else filename.stem
+            
+            image_files.sort(key=get_number)
         
         print(f"找到 {len(image_files)} 个图片文件")
         
@@ -137,62 +141,47 @@ class VideoImageConverter:
             str(output_path), fourcc, fps, frame_size
         )
         
-        num_workers = num_workers or self.default_workers
-        
-        # 使用线程池预加载图片
-        frames = []
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            future_to_file = {
-                executor.submit(self._read_image, img_file, resize): img_file 
-                for img_file in image_files
-            }
-            
-            for future in tqdm(as_completed(future_to_file), 
-                             total=len(image_files),
-                             desc="Loading images"):
-                img_file = future_to_file[future]
-                try:
-                    frame = future.result()
-                    if frame is not None:
-                        frames.append((img_file, frame))
-                except Exception as e:
-                    print(f"处理图片 {img_file} 时出错: {str(e)}")
-        
-        if not frames:
-            raise ValueError("没有成功读取任何图片")
-        
-        print(f"成功加载 {len(frames)} 张图片")
-        
-        # 确保帧列表按文件名排序
-        if sort_files:
-            frames.sort(key=lambda x: x[0].stem)
-        
-        # 写入视频
         try:
-            total_frames = len(frames) * frames_per_image + (len(frames) - 1) * transition_frames
-            with tqdm(total=total_frames, desc="Writing video") as pbar:
-                for i, (img_file, current_frame) in enumerate(frames):
+            total_frames = len(image_files) * frames_per_image + (len(image_files) - 1) * transition_frames
+            with tqdm(total=total_frames, desc="Processing frames") as pbar:
+                # 逐个处理图片
+                for i, img_file in enumerate(image_files):
+                    # 读取当前图片
+                    current_frame = cv2.imread(str(img_file))
+                    if current_frame is None:
+                        print(f"警告: 无法读取图片 {img_file}")
+                        continue
+                    
+                    if resize:
+                        current_frame = cv2.resize(current_frame, resize)
+                    
                     # 写入当前图片的帧
                     for _ in range(frames_per_image):
                         out.write(current_frame)
                         pbar.update(1)
                     
                     # 如果不是最后一张图片且有过渡帧，则创建过渡效果
-                    if i < len(frames) - 1 and transition_frames > 0:
-                        next_frame = frames[i + 1][1]
-                        # 创建淡入淡出效果
-                        for t in range(transition_frames):
-                            alpha = t / transition_frames
-                            blended_frame = cv2.addWeighted(
-                                current_frame, 1 - alpha,
-                                next_frame, alpha,
-                                0
-                            )
-                            out.write(blended_frame)
-                            pbar.update(1)
+                    if i < len(image_files) - 1 and transition_frames > 0:
+                        # 读取下一张图片
+                        next_frame = cv2.imread(str(image_files[i + 1]))
+                        if next_frame is not None:
+                            if resize:
+                                next_frame = cv2.resize(next_frame, resize)
+                            
+                            # 创建淡入淡出效果
+                            for t in range(transition_frames):
+                                alpha = t / transition_frames
+                                blended_frame = cv2.addWeighted(
+                                    current_frame, 1 - alpha,
+                                    next_frame, alpha,
+                                    0
+                                )
+                                out.write(blended_frame)
+                                pbar.update(1)
             
             print(f"\n视频生成完成，总帧数: {total_frames}")
             print(f"视频时长: {total_frames/fps:.2f} 秒")
+            print(f"处理的图片数量: {len(image_files)}")
             return True
             
         except Exception as e:

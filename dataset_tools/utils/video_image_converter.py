@@ -95,12 +95,25 @@ class VideoImageConverter:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
         # 获取所有图片文件
-        image_files = [f for f in image_dir.glob(f"*{image_format}")]
+        image_files = []
+        # 支持多种格式和大小写
+        if image_format == '*':
+            for fmt in self.supported_image_formats:
+                image_files.extend(list(image_dir.glob(f"*{fmt}")))
+        else:
+            # 同时查找小写和大写扩展名
+            image_files.extend(list(image_dir.glob(f"*{image_format.lower()}")))
+            if image_format.lower() != image_format.upper():
+                image_files.extend(list(image_dir.glob(f"*{image_format.upper()}")))
+        
         if not image_files:
             raise ValueError(f"未找到{image_format}格式的图片文件")
-            
+        
+        # 确保文件名排序正确
         if sort_files:
-            image_files.sort()
+            image_files.sort(key=lambda x: x.stem)  # 按文件名数字排序
+        
+        print(f"找到 {len(image_files)} 个图片文件")
         
         # 读取第一张图片获取尺寸
         first_image = cv2.imread(str(image_files[0]))
@@ -145,15 +158,20 @@ class VideoImageConverter:
                 except Exception as e:
                     print(f"处理图片 {img_file} 时出错: {str(e)}")
         
-        # 按文件名排序
+        if not frames:
+            raise ValueError("没有成功读取任何图片")
+        
+        print(f"成功加载 {len(frames)} 张图片")
+        
+        # 确保帧列表按文件名排序
         if sort_files:
-            frames.sort(key=lambda x: x[0].name)
+            frames.sort(key=lambda x: x[0].stem)
         
         # 写入视频
         try:
             total_frames = len(frames) * frames_per_image + (len(frames) - 1) * transition_frames
             with tqdm(total=total_frames, desc="Writing video") as pbar:
-                for i, (_, current_frame) in enumerate(frames):
+                for i, (img_file, current_frame) in enumerate(frames):
                     # 写入当前图片的帧
                     for _ in range(frames_per_image):
                         out.write(current_frame)
@@ -173,10 +191,14 @@ class VideoImageConverter:
                             out.write(blended_frame)
                             pbar.update(1)
             
+            print(f"\n视频生成完成，总帧数: {total_frames}")
+            print(f"视频时长: {total_frames/fps:.2f} 秒")
             return True
+            
         except Exception as e:
             print(f"写入视频时出错: {str(e)}")
             return False
+            
         finally:
             out.release()
     
@@ -306,7 +328,7 @@ class VideoImageConverter:
                     
                     frame_count += 1
                 
-                # 处理���余的帧
+                # 处理余的帧
                 if frame_buffer:
                     batch_futures = [
                         executor.submit(self._save_frame, f, p, resize, img_params)

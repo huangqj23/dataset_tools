@@ -79,12 +79,12 @@ class HBBDatasetConverter:
             'categories': []
         }
         
-        # 读取类别
+        # 读取类别，ID从1开始
         with open(classes_file, 'r') as f:
             classes = f.read().strip().split('\n')
             for i, cls in enumerate(classes):
                 dataset['categories'].append({
-                    'id': i,
+                    'id': i + 1,  # ID从1开始
                     'name': cls,
                     'supercategory': 'none'
                 })
@@ -137,7 +137,7 @@ class HBBDatasetConverter:
                             
                             annotations.append({
                                 'image_id': img_id,
-                                'category_id': int(cls_id),
+                                'category_id': int(cls_id) + 1,  # YOLO的类别ID加1
                                 'bbox': [x, y, w, h],
                                 'area': w * h,
                                 'iscrowd': 0
@@ -169,7 +169,7 @@ class HBBDatasetConverter:
         return dataset
 
     def _read_coco(self, coco_path: str) -> Dict:
-        """读取COCO格式数据集"""
+        """��取COCO格式数据集"""
         with open(coco_path, 'r') as f:
             return json.load(f)
 
@@ -261,11 +261,11 @@ class HBBDatasetConverter:
                         ann_id += 1
                     dataset['categories'].update(categories)
         
-        # 转换categories为列表格式
+        # 转换categories为列表格式，ID从1开始
         categories = []
         for i, name in enumerate(sorted(dataset['categories'])):
             categories.append({
-                'id': i,
+                'id': i + 1,  # ID从1开始
                 'name': name,
                 'supercategory': 'none'
             })
@@ -286,8 +286,13 @@ class HBBDatasetConverter:
         
         # 保存类别文件
         with open(output_dir / 'classes.txt', 'w') as f:
-            for cat in dataset['categories']:
+            # 按ID排序类别（减1后）
+            categories = sorted(dataset['categories'], key=lambda x: x['id'])
+            for cat in categories:
                 f.write(f"{cat['name']}\n")
+        
+        # 创建类别ID映射（COCO ID -> YOLO ID）
+        coco_to_yolo_id = {cat['id']: i for i, cat in enumerate(categories)}
         
         # 保存标注文件
         for img in dataset['images']:
@@ -309,7 +314,10 @@ class HBBDatasetConverter:
                     w = w / width
                     h = h / height
                     
-                    f.write(f"{ann['category_id']} {x_center} {y_center} {w} {h}\n")
+                    # 将COCO类别ID转换为YOLO类别ID（从0开始）
+                    yolo_cat_id = coco_to_yolo_id[ann['category_id']]
+                    
+                    f.write(f"{yolo_cat_id} {x_center} {y_center} {w} {h}\n")
 
     def _save_coco(self, dataset: Dict, output_path: str):
         """保存为COCO格式"""
@@ -329,7 +337,7 @@ class HBBDatasetConverter:
             # 创建XML根节点
             root = ET.Element('annotation')
             
-            # 添加基本信��
+            # 添加基本信
             ET.SubElement(root, 'filename').text = img['file_name']
             
             size = ET.SubElement(root, 'size')

@@ -13,13 +13,15 @@ class VideoImageConverter:
         # 支持的视频格式
         self.supported_video_formats = [
             '.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', 
-            '.webm', '.m4v', '.mpeg', '.mpg', '.3gp'
+            '.webm', '.m4v', '.mpeg', '.mpg', '.3gp',
         ]
         
         # 支持的图片格式
         self.supported_image_formats = [
             '.jpg', '.jpeg', '.png', '.bmp', '.tiff', 
-            '.webp', '.gif', '.ppm', '.pgm'
+            '.webp', '.gif', '.ppm', '.pgm', '.JPG', 
+            '.JPEG', '.PNG', '.BMP', '.TIFF', '.WEBP', 
+            '.GIF', '.PPM', '.PGM'
         ]
         
         # 视频编解码器映射
